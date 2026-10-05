@@ -1,0 +1,185 @@
+1:import React, { useState } from 'react';
+2:import { useLocalStorage } from '../hooks/useLocalStorage';
+3:import { logAction } from '../utils/logger';
+17:} from 'lucide-react';
+27:};
+43:};
+55:};
+58:  { id: 'MO-1042', taskName: 'Fix Lathe Spindle', machineId: 'M-01', machineName: 'CNC Lathe Alpha', issue: 'Spindle vibration exceeds tolerance', priority: 'High', status: 'In Progress', reportedBy: 'J. Smith', assignedTo: 'M. Johnson', dateReported: '2026-04-26' },
+59:  { id: 'WO-1043', taskName: 'Calibrate Welder', machineId: 'M-03', machineName: 'Robotic Welder 2', issue: 'Calibration error on axis C', priority: 'Medium', status: 'Open', reportedBy: 'T. Clark', dateReported: '2026-04-27' },
+60:  { id: 'WO-1044', taskName: 'Repair Jammed Conveyor', machineId: 'M-05', machineName: 'Packaging Line A', issue: 'Conveyor belt jamming periodically', priority: 'Critical', status: 'Waiting for Parts', reportedBy: 'S. Lee', assignedTo: 'D. Miller', dateReported: '2026-04-25' },
+61:  { id: 'WO-1045', taskName: 'Fix Fluid Leak', machineId: 'M-08', machineName: 'Injection Molder', issue: 'Hydraulic fluid leak', priority: 'High', status: 'Completed', reportedBy: 'R. Davis', assignedTo: 'M. Johnson', dateReported: '2026-04-24' },
+65:  { id: 'PO-9021', partName: 'Conveyor Drive Motor', workOrderId: 'WO-1044', machineName: 'Packaging Line A', quantity: 1, cost: 1250, supplier: 'Industrial Motors Co', status: 'In Transit', expectedDelivery: '2026-04-29' },
+66:  { id: 'PO-9022', partName: 'Hydraulic Seals Kit', workOrderId: 'WO-1045', machineName: 'Injection Molder', quantity: 3, cost: 145, supplier: 'Seals Direct', status: 'Delivered', expectedDelivery: '2026-04-25' },
+67:  { id: 'PO-9023', partName: 'Spindle Bearing ASM', workOrderId: 'WO-1042', machineName: 'CNC Lathe Alpha', quantity: 2, cost: 890, supplier: 'Precision Bearings LLC', status: 'Ordered', expectedDelivery: '2026-05-02' },
+78:  })));
+79:};
+81:const MaintenanceOrderEditor = ({ initialOrder, onSave, onCancel }: { initialOrder: WorkOrder | null, onSave: (doc: WorkOrder) => void, onCancel: () => void }) => {
+82:  const [docId, setDocId] = useState(initialOrder?.id || `MO-${Math.floor(1000 + Math.random() * 9000)}`);
+87:  const [items, setItems] = useState<WorkOrderItem[]>(initialOrder?.items || (initialOrder ? [] : [{ id: `item-${Date.now()}`, description: '', quantity: '1', dateSent: new Date().toISOString().split('T')[0], state: 'Pending', images: [], priority: 'Low' }]));
+90:    setItems([...items, { id: `item-${Date.now()}`, description: '', quantity: '1', dateSent: new Date().toISOString().split('T')[0], state: 'Pending', images: [], priority: 'Low' }]);
+91:  };
+94:    setItems(items.map(it => it.id === id ? { ...it, [field]: value } : it));
+95:  };
+99:  };
+105:      setItems(items.map(it => it.id === id ? { ...it, images: [...it.images, ...base64s] } : it));
+106:    }
+107:  };
+113:          <Wrench className="w-5 h-5 text-blue-400" /> {initialOrder ? "Edit Maintenance Order" : "New Maintenance Order"}
+115:        <button onClick={onCancel} className="text-quaternary hover:text-muted transition-colors cursor-pointer">
+124:            <input type="text" value={docId} onChange={e => setDocId(e.target.value)} className="w-full px-3 py-2 bg-canvas border border-surface-elevated rounded-md text-sm text-primary focus:ring-2 focus:ring-blue-500 outline-none transition-all" />
+128:            <select value={status} onChange={e => setStatus(e.target.value)} className="w-full px-3 py-2 bg-canvas border border-surface-elevated rounded-md text-sm text-primary focus:ring-2 focus:ring-blue-500 outline-none transition-all">
+138:            <input type="text" value={requestedBy} onChange={e => setRequestedBy(e.target.value)} className="w-full px-3 py-2 bg-canvas border border-surface-elevated rounded-md text-sm text-primary focus:ring-2 focus:ring-blue-500 outline-none transition-all" />
+142:            <input type="text" value={assignedTo} onChange={e => setAssignedTo(e.target.value)} className="w-full px-3 py-2 bg-canvas border border-surface-elevated rounded-md text-sm text-primary focus:ring-2 focus:ring-blue-500 outline-none transition-all" />
+146:            <input type="date" value={dateReported} onChange={e => setDateReported(e.target.value)} className="w-full px-3 py-2 bg-canvas border border-surface-elevated rounded-md text-sm text-primary focus:ring-2 focus:ring-blue-500 outline-none transition-all dark:[color-scheme:dark]" />
+153:            <button onClick={handleAddItem} className="text-xs font-medium text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1 cursor-pointer">
+160:              <div key={item.id} className="p-3 border border-surface-elevated rounded-md bg-canvas/30 space-y-3">
+162:                  <h5 className="text-xs font-semibold text-quaternary uppercase tracking-wider">Item {idx + 1}</h5>
+163:                  <button onClick={() => removeItem(item.id)} className="text-quaternary hover:text-red-500 cursor-pointer">
+170:                    <input type="text" value={item.description} onChange={e => updateItem(item.id, 'description', e.target.value)} className="w-full px-2 py-1.5 bg-canvas border border-surface-elevated rounded text-xs text-primary focus:ring-1 focus:ring-blue-500 outline-none transition-all" />
+174:                    <input type="text" value={item.quantity} onChange={e => updateItem(item.id, 'quantity', e.target.value)} className="w-full px-2 py-1.5 bg-canvas border border-surface-elevated rounded text-xs text-primary focus:ring-1 focus:ring-blue-500 outline-none transition-all" />
+178:                    <input type="text" value={item.state} onChange={e => updateItem(item.id, 'state', e.target.value)} className="w-full px-2 py-1.5 bg-canvas border border-surface-elevated rounded text-xs text-primary focus:ring-1 focus:ring-blue-500 outline-none transition-all" />
+184:                    <input type="date" value={item.dateSent} onChange={e => updateItem(item.id, 'dateSent', e.target.value)} className="w-full px-2 py-1.5 bg-canvas border border-surface-elevated rounded text-xs text-primary focus:ring-1 focus:ring-blue-500 outline-none transition-all dark:[color-scheme:dark]" />
+188:                    <select value={item.priority} onChange={e => updateItem(item.id, 'priority', e.target.value)} className="w-full px-2 py-1.5 bg-canvas border border-surface-elevated rounded text-xs text-primary focus:ring-1 focus:ring-blue-500 outline-none transition-all">
+197:                    <input type="file" multiple accept="image/*" onChange={(e) => handleItemImages(item.id, e)} className="w-full text-[10px] text-primary file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-[10px] file:font-semibold file:bg-surface-elevated file:text-primary hover:file:bg-surface cursor-pointer" />
+198:                    {item.images.length > 0 && <span className="text-[10px] text-blue-400 mt-1 block">{item.images.length} images attached</span>}
+202:            ))}
+203:            {items.length === 0 && <div className="text-xs text-quaternary text-center py-4 bg-surface/20 rounded border border-dashed border-divider-subtle">No items added.</div>}
+209:        <button onClick={onCancel} className="px-4 py-2 bg-surface hover:bg-surface-elevated border border-surface-strong text-secondary rounded text-sm font-medium transition-colors cursor-pointer">Cancel</button>
+210:        <button onClick={() => onSave({ ...initialOrder, id: docId, status, requestedBy, assignedTo, dateReported, items })} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white-fixed rounded text-sm font-medium transition-colors cursor-pointer">
+211:          {initialOrder ? "Save Changes" : "Create MO"}
+216:};
+236:    if (confirm(`Move maintenance order ${id} to trash?`)) {
+243:      };
+246:      logAction('Work Order Deleted', `Maintenance order ${order.id} was moved to trash. Removed: taskName: ${order.taskName}, issue: ${order.issue}, priority: ${order.priority}, status: ${order.status}`, 'warning');
+248:    }
+249:  };
+256:    if (confirm(`Move procurement order ${id} to trash?`)) {
+263:      };
+266:      logAction('Procurement Order Deleted', `Procurement order ${order.id} was moved to trash. Removed: partName: ${order.partName}, quantity: ${order.quantity}, status: ${order.status}`, 'warning');
+268:    }
+269:  };
+273:      logAction('Work Order Updated', `Maintenance order ${doc.id} was updated.`, 'info');
+275:    } else {
+276:      logAction('Work Order Created', `Maintenance order ${doc.id} was created.`, 'success');
+278:    }
+281:  };
+300:        };
+306:        });
+307:        const changeDetails = changes.map(k => `${k}: ${(editingOrder as any)[k]} -> ${(updatedPO as any)[k]}`).join(', ');
+308:        logAction('Procurement Order Updated', `Procurement order ${editingOrder.id} was updated.${changeDetails ? ` Changes: ${changeDetails}` : ''}`, 'info');
+310:      } else {
+313:        const newId = `PO-${Math.floor(1000 + Math.random() * 9000)}`;
+324:        };
+325:        const detailsArray = Object.entries(newPO).filter(([k,v]) => v !== undefined && k !== 'id').map(([k,v]) => `${k}: ${v}`).join(', ');
+326:        logAction('Procurement Order Created', `Procurement order ${newId} was created. Added: ${detailsArray}`, 'success');
+328:      }
+329:    }
+333:  };
+342:    }
+343:  };
+356:    }
+357:  };
+370:    }
+371:  };
+388:              onClick={() => setIsCreatingOrder(true)}
+392:              {activeTab === 'Maintenance' ? 'New Maintenance Order' : 'New Part Request'}
+394:          )}
+402:              onClick={() => setActiveTab('Maintenance')}
+407:              }`}
+412:              onClick={() => setActiveTab('Procurement')}
+417:              }`}
+427:                  onClick={() => setMoViewStatus('Active')}
+428:                  className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors ${moViewStatus === 'Active' ? 'bg-surface text-primary shadow-sm' : 'text-quinary hover:text-secondary'}`}
+433:                  onClick={() => setMoViewStatus('Finished')}
+434:                  className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors ${moViewStatus === 'Finished' ? 'bg-surface text-primary shadow-sm' : 'text-quinary hover:text-secondary'}`}
+439:            )}
+444:                placeholder={`Search ${activeTab.toLowerCase()}...`}
+445:              value={searchQuery}
+446:              onChange={(e) => setSearchQuery(e.target.value)}
+474:                }).map((wo) => (
+475:                  <tr key={wo.id} className="hover:bg-surface/50 transition-colors group cursor-pointer" onClick={() => setViewingOrder(wo)}>
+477:                      {wo.id}
+478:                      <div className="text-[10px] text-quaternary font-normal mt-0.5">{wo.dateReported}</div>
+481:                      {wo.taskName}
+484:                      {wo.issue}
+487:                      <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${getPriorityColor(wo.priority)}`}>
+488:                        {wo.priority}
+492:                      <div className={`flex items-center gap-1.5 text-xs font-medium ${getStatusColor(wo.status)}`}>
+493:                        {getStatusIcon(wo.status)}
+494:                        {wo.status}
+501:                            {wo.assignedTo.charAt(0)}
+503:                          {wo.assignedTo}
+507:                      )}
+512:                          onClick={(e) => { e.stopPropagation(); setEditingOrder(wo); }}
+518:                          onClick={(e) => handleDeleteWorkOrder(wo.id, e)}
+526:                ))}
+544:                  <tr key={po.id} className="hover:bg-surface/50 transition-colors group cursor-pointer" onClick={() => setViewingOrder(po)}>
+546:                      {po.id}
+547:                      <div className="text-[10px] text-quaternary font-normal mt-0.5">${po.cost.toFixed(2)}</div>
+550:                      {po.partName}
+551:                      <div className="text-[10px] text-quaternary mt-0.5">Qty: {po.quantity}</div>
+555:                        <span className="text-blue-500 hover:underline cursor-pointer">{po.workOrderId}</span>
+558:                      )}
+559:                      <div className="text-[10px] text-quaternary mt-0.5">{po.machineName}</div>
+562:                      {po.supplier}
+565:                      <div className={`flex items-center gap-1.5 text-xs font-medium ${getStatusColor(po.status)}`}>
+566:                        {getStatusIcon(po.status)}
+567:                        {po.status}
+573:                        {po.expectedDelivery}
+579:                          onClick={(e) => { e.stopPropagation(); setEditingOrder(po); }}
+585:                          onClick={(e) => handleDeleteProcurementOrder(po.id, e)}
+593:                ))}
+596:          )}
+600:      {/* New/Edit Order Modal */}
+603:          <div className="absolute inset-0 bg-canvas/80 backdrop-blur-sm" onClick={() => { setIsCreatingOrder(false); setEditingOrder(null); }}></div>
+608:              return <MaintenanceOrderEditor initialOrder={(editingOrder as WorkOrder) || null} onSave={handleSaveMO} onCancel={() => { setIsCreatingOrder(false); setEditingOrder(null); }} />;
+609:            }
+612:          <form onSubmit={handleSubmit} className="relative bg-surface border border-divider rounded-xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[85vh]">
+615:                <Package className="w-5 h-5 text-blue-400" /> {isEditing ? "Edit Part Request" : "New Part Request"}
+618:                onClick={() => { setIsCreatingOrder(false); setEditingOrder(null); }} 
+634:                    defaultValue={isEditing ? po?.partName : ""}
+642:                    defaultValue={isEditing ? po?.workOrderId || "" : ""}
+647:                         <option key={w.id} value={w.id}>{w.id}</option>
+648:                      ))}
+658:                      defaultValue={isEditing ? po?.quantity : ""}
+669:                    defaultValue={isEditing ? po?.supplier : ""}
+679:                    defaultValue={isEditing ? po?.cost : ""}
+687:                    defaultValue={isEditing ? po?.status : "Requested"}
+702:                      defaultValue={isEditing ? po?.expectedDelivery : ""}
+712:                onClick={() => { setIsCreatingOrder(false); setEditingOrder(null); }}
+722:                {isEditing ? "Save Changes" : "Submit Request"}
+727:          })()}
+729:      )}
+731:      {/* View Order Modal */}
+734:          <div className="absolute inset-0 bg-canvas/80 backdrop-blur-sm" onClick={() => setViewingOrder(null)}></div>
+742:                )}
+745:                onClick={() => setViewingOrder(null)} 
+757:                    <span className="font-medium text-primary">{viewingOrder.id}</span>
+761:                    <span className="font-medium text-secondary">{viewingOrder.taskName}</span>
+765:                    <span className="text-sm text-secondary bg-surface-elevated/50 p-3 rounded-md">{viewingOrder.issue}</span>
+771:                      <span className={`inline-flex self-start items-center px-2 py-0.5 rounded text-xs font-medium border ${getPriorityColor(viewingOrder.priority)}`}>
+772:                        {viewingOrder.priority}
+777:                      <div className={`flex items-center gap-1.5 text-sm font-medium ${getStatusColor(viewingOrder.status)}`}>
+778:                        {getStatusIcon(viewingOrder.status)} {viewingOrder.status}
+786:                      <span className="text-sm text-secondary">{viewingOrder.reportedBy}</span>
+790:                      <span className="text-sm text-secondary">{viewingOrder.assignedTo || 'Unassigned'}</span>
+796:                    <span className="text-sm text-secondary">{viewingOrder.dateReported}</span>
+804:                          <img key={idx} src={img} alt={`Attachment ${idx + 1}`} className="rounded border border-divider-subtle w-full h-32 object-cover" />
+805:                        ))}
+808:                  )}
+814:                    <span className="font-medium text-primary">{viewingOrder.id}</span>
+818:                    <span className="font-medium text-secondary">{viewingOrder.partName}</span>
+822:                    <span className="text-sm text-secondary">{viewingOrder.workOrderId || '-'}</span>
+826:                    <span className="text-sm text-secondary">{viewingOrder.quantity}</span>
+830:                    <span className="text-sm text-secondary">${viewingOrder.cost.toFixed(2)}</span>
+834:                    <span className="text-sm text-secondary">{viewingOrder.supplier}</span>
+838:                    <div className={`flex items-center gap-1.5 text-sm font-medium ${getStatusColor(viewingOrder.status)}`}>
+839:                      {getStatusIcon(viewingOrder.status)} {viewingOrder.status}
+844:                    <span className="text-sm text-secondary">{viewingOrder.expectedDelivery}</span>
+847:              )}
+855:                }}
+858:                <Trash2 className="w-4 h-4" /> Delete {('taskName' in viewingOrder) ? 'Order' : 'Request'}
+861:                onClick={() => setViewingOrder(null)}
+869:      )}
+872:}

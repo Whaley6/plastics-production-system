@@ -1,0 +1,8 @@
+{
+  "name": "Plastics Production & Maintenance System",
+  "description": "A comprehensive factory management dashboard for injection and blow molding, featuring dynamic configurable schemas and robust worker, order, and maintenance modules.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

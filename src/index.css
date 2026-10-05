@@ -1,0 +1,126 @@
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Cairo', 'Inter', -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Courier New', monospace;
+  
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-elevated: var(--surface-elevated);
+  --color-surface-strong: var(--surface-strong);
+  --color-surface-stronger: var(--surface-stronger);
+
+  --color-primary: var(--primary);
+  --color-primary-muted: var(--primary-muted);
+  --color-secondary: var(--secondary);
+  --color-muted: var(--muted);
+  --color-tertiary: var(--tertiary);
+  --color-quaternary: var(--quaternary);
+  --color-quinary: var(--quinary);
+
+  --color-white-fixed: #ffffff;
+
+  --color-divider: var(--divider);
+  --color-divider-subtle: var(--divider-subtle);
+  --color-divider-strong: var(--divider-strong);
+}
+
+:root {
+  font-size: 85%; /* Scales down exactly 15% since default is 100% (16px). All rem values in Tailwind will scale down accordingly */
+  /* Default to Light Mode */
+  --canvas: #f8fafc; 
+  --surface: #ffffff; 
+  --surface-elevated: #f1f5f9; 
+  --surface-strong: #e2e8f0; 
+  --surface-stronger: #cbd5e1; 
+
+  --primary: #0f172a; 
+  --primary-muted: #1e293b;
+  --secondary: #334155; 
+  --muted: #475569; 
+  --tertiary: #64748b; 
+  --quaternary: #94a3b8; 
+  --quinary: #cbd5e1; 
+
+  --divider: rgba(0, 0, 0, 0.1); 
+  --divider-subtle: rgba(0, 0, 0, 0.05);
+  --divider-strong: rgba(0, 0, 0, 0.2);
+}
+
+.dark {
+  /* Dark Mode */
+  --canvas: #0f172a; 
+  --surface: #1e293b; 
+  --surface-elevated: #334155; 
+  --surface-strong: #475569; 
+  --surface-stronger: #64748b;
+
+  --primary: #f8fafc; 
+  --primary-muted: #f1f5f9;
+  --secondary: #e2e8f0; 
+  --muted: #cbd5e1; 
+  --tertiary: #94a3b8; 
+  --quaternary: #64748b; 
+  --quinary: #475569; 
+
+  --divider: rgba(255, 255, 255, 0.1);
+  --divider-subtle: rgba(255, 255, 255, 0.05);
+  --divider-strong: rgba(255, 255, 255, 0.2);
+}
+
+@layer base {
+  body {
+    @apply bg-canvas text-primary font-sans antialiased m-0 p-0 overflow-hidden;
+  }
+}
+
+/* BiDi (Arabic/English) text direction and alignment auto-handling */
+input[type="text"],
+input[type="search"],
+textarea,
+
+
+.bidi-text,
+.bidi-auto {
+  text-align: start;
+  unicode-bidi: plaintext !important;
+}
+
+/* Helper to force right-to-left layout for bilingual fields */
+.bidi-force-rtl {
+  direction: rtl !important;
+  text-align: right !important;
+  unicode-bidi: embed !important;
+}
+th, td {
+  text-align: center !important;
+}
+
+/* Global Read-Only Module Styles */
+.global-readonly-module input:not([type="search"]):not([placeholder*="search" i]):not([placeholder*="بحث" i]),
+.global-readonly-module textarea,
+.global-readonly-module select,
+.global-readonly-module button:not(.allow-readonly):not([class*="border-b-2"]) {
+  pointer-events: none !important;
+  opacity: 0.6 !important;
+  cursor: not-allowed !important;
+}
+
+/* Allow specific interactions even in read-only mode */
+.global-readonly-module .allow-readonly,
+.global-readonly-module .allow-readonly *,
+.global-readonly-module button.allow-readonly {
+  pointer-events: auto !important;
+  opacity: 1 !important;
+  cursor: pointer !important;
+}
+
+/* Global Button Click Enhancements */
+button:not(:disabled):not(.tab-button):not([class*="border-b-2"]) {
+  transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.15s ease, opacity 0.15s ease;
+}
+
+button:not(:disabled):not(.tab-button):not([class*="border-b-2"]):active {
+  transform: scale(0.96);
+}
