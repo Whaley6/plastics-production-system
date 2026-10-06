@@ -160,8 +160,20 @@ export async function transferSqliteToPostgres(pool: pg.Pool, customSqlitePath?:
   };
 }
 
-// Initialize database (PostgreSQL primary, SQLite fallback)
+// Initialize database (PostgreSQL in production, SQLite in local dev)
 export async function initDatabase(): Promise<{ type: DbType, connected: boolean, error?: string }> {
+  const isProduction = process.env.NODE_ENV === 'production';
+  const usePostgresLocal = process.env.USE_POSTGRES_LOCAL === 'true';
+
+  // In local development, use local SQLite so experiments remain completely isolated from the live cloud database
+  if (!isProduction && !usePostgresLocal) {
+    console.log("[Database] Local Dev Server running on SQLite (data/database.sqlite).");
+    console.log("[Database] Your cloud Neon PostgreSQL database remains safe and connected to Vercel only!");
+    initSqlite();
+    activeDbType = 'sqlite';
+    return { type: 'sqlite', connected: true };
+  }
+
   const pgConfig = getPgPoolConfig();
 
   if (pgConfig) {
