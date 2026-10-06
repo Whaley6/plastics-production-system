@@ -50,6 +50,7 @@
 
 .dark {
   /* Dark Mode */
+  color-scheme: dark;
   --canvas: #0f172a; 
   --surface: #1e293b; 
   --surface-elevated: #334155; 
@@ -67,6 +68,30 @@
   --divider: rgba(255, 255, 255, 0.1);
   --divider-subtle: rgba(255, 255, 255, 0.05);
   --divider-strong: rgba(255, 255, 255, 0.2);
+}
+
+/* Ensure native dropdown popups have proper dark/light theme background and contrast */
+select {
+  color-scheme: light;
+}
+
+.dark select,
+html.dark select {
+  color-scheme: dark !important;
+}
+
+select option,
+option {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+}
+
+.dark select option,
+html.dark select option,
+.dark option,
+html.dark option {
+  background-color: #1e293b !important;
+  color: #f8fafc !important;
 }
 
 @layer base {

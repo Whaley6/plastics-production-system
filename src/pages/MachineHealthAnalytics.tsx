@@ -1013,13 +1013,13 @@ export default function MachineHealthAnalytics() {
                         setPageSize(Number(e.target.value));
                         setCurrentPage(1);
                       }}
-                      className="bg-transparent text-primary font-bold focus:outline-none cursor-pointer"
+                      className="bg-transparent text-primary font-bold focus:outline-none cursor-pointer [&>option]:bg-surface [&>option]:text-primary dark:[color-scheme:dark]"
                       aria-label="Show entries per page"
                     >
-                      <option value={10}>10</option>
-                      <option value={25}>25</option>
-                      <option value={50}>50</option>
-                      <option value={100}>100</option>
+                      <option value={10} className="bg-surface text-primary">10</option>
+                      <option value={25} className="bg-surface text-primary">25</option>
+                      <option value={50} className="bg-surface text-primary">50</option>
+                      <option value={100} className="bg-surface text-primary">100</option>
                     </select>
                   </div>
                 )}
@@ -1031,12 +1031,12 @@ export default function MachineHealthAnalytics() {
                     <select
                       value={selectedMonthFilter}
                       onChange={e => setSelectedMonthFilter(e.target.value)}
-                      className="bg-transparent text-primary font-medium focus:outline-none cursor-pointer"
+                      className="bg-transparent text-primary font-medium focus:outline-none cursor-pointer [&>option]:bg-surface [&>option]:text-primary dark:[color-scheme:dark]"
                       aria-label="Filter by Month"
                     >
-                      <option value="all">All Months ({availableMonths.length})</option>
+                      <option value="all" className="bg-surface text-primary">All Months ({availableMonths.length})</option>
                       {availableMonths.map(m => (
-                        <option key={m.key} value={m.key}>{m.label}</option>
+                        <option key={m.key} value={m.key} className="bg-surface text-primary">{m.label}</option>
                       ))}
                     </select>
                   </div>
@@ -1049,12 +1049,12 @@ export default function MachineHealthAnalytics() {
                     <select
                       value={selectedDayFilter}
                       onChange={e => setSelectedDayFilter(e.target.value)}
-                      className="bg-transparent text-primary font-medium focus:outline-none cursor-pointer"
+                      className="bg-transparent text-primary font-medium focus:outline-none cursor-pointer [&>option]:bg-surface [&>option]:text-primary dark:[color-scheme:dark]"
                       aria-label="Filter by Day"
                     >
-                      <option value="all">All Days ({availableDays.length})</option>
+                      <option value="all" className="bg-surface text-primary">All Days ({availableDays.length})</option>
                       {availableDays.map(d => (
-                        <option key={d.key} value={d.key}>{d.label}</option>
+                        <option key={d.key} value={d.key} className="bg-surface text-primary">{d.label}</option>
                       ))}
                     </select>
                   </div>
@@ -1064,11 +1064,11 @@ export default function MachineHealthAnalytics() {
                 <select
                   value={selectedTypeFilter}
                   onChange={e => setSelectedTypeFilter(e.target.value)}
-                  className="px-3 py-1.5 bg-canvas border border-divider rounded-lg text-xs text-primary focus:outline-none"
+                  className="px-3 py-1.5 bg-canvas border border-divider rounded-lg text-xs text-primary focus:outline-none [&>option]:bg-surface [&>option]:text-primary dark:[color-scheme:dark]"
                 >
-                  <option value="all">All Types (All Colors)</option>
+                  <option value="all" className="bg-surface text-primary">All Types (All Colors)</option>
                   {DOWNTIME_TYPES.map(t => (
-                    <option key={t.id} value={t.name}>{t.name}</option>
+                    <option key={t.id} value={t.name} className="bg-surface text-primary">{t.name}</option>
                   ))}
                 </select>
 
@@ -1357,12 +1357,12 @@ export default function MachineHealthAnalytics() {
                         setPageSize(Number(e.target.value));
                         setCurrentPage(1);
                       }}
-                      className="bg-canvas border border-divider rounded-lg px-2.5 py-1 text-xs text-primary font-bold focus:outline-none focus:border-blue-500 cursor-pointer"
+                      className="bg-canvas border border-divider rounded-lg px-2.5 py-1 text-xs text-primary font-bold focus:outline-none focus:border-blue-500 cursor-pointer [&>option]:bg-surface [&>option]:text-primary dark:[color-scheme:dark]"
                     >
-                      <option value={10}>10</option>
-                      <option value={25}>25</option>
-                      <option value={50}>50</option>
-                      <option value={100}>100</option>
+                      <option value={10} className="bg-surface text-primary">10</option>
+                      <option value={25} className="bg-surface text-primary">25</option>
+                      <option value={50} className="bg-surface text-primary">50</option>
+                      <option value={100} className="bg-surface text-primary">100</option>
                     </select>
                   </div>
 
@@ -1517,12 +1517,12 @@ export default function MachineHealthAnalytics() {
                   <select
                     value={selectedMonthFilter}
                     onChange={e => setSelectedMonthFilter(e.target.value)}
-                    className="bg-transparent text-primary font-medium focus:outline-none cursor-pointer"
+                    className="bg-transparent text-primary font-medium focus:outline-none cursor-pointer [&>option]:bg-surface [&>option]:text-primary dark:[color-scheme:dark]"
                     aria-label="Filter charts by Month"
                   >
-                    <option value="all">All Months ({availableMonths.length})</option>
+                    <option value="all" className="bg-surface text-primary">All Months ({availableMonths.length})</option>
                     {availableMonths.map(m => (
-                      <option key={m.key} value={m.key}>{m.label}</option>
+                      <option key={m.key} value={m.key} className="bg-surface text-primary">{m.label}</option>
                     ))}
                   </select>
                 </div>
@@ -1535,12 +1535,12 @@ export default function MachineHealthAnalytics() {
                   <select
                     value={selectedDayFilter}
                     onChange={e => setSelectedDayFilter(e.target.value)}
-                    className="bg-transparent text-primary font-medium focus:outline-none cursor-pointer"
+                    className="bg-transparent text-primary font-medium focus:outline-none cursor-pointer [&>option]:bg-surface [&>option]:text-primary dark:[color-scheme:dark]"
                     aria-label="Filter charts by Day"
                   >
-                    <option value="all">All Days ({availableDays.length})</option>
+                    <option value="all" className="bg-surface text-primary">All Days ({availableDays.length})</option>
                     {availableDays.map(d => (
-                      <option key={d.key} value={d.key}>{d.label}</option>
+                      <option key={d.key} value={d.key} className="bg-surface text-primary">{d.label}</option>
                     ))}
                   </select>
                 </div>
@@ -1550,12 +1550,12 @@ export default function MachineHealthAnalytics() {
               <select
                 value={selectedTypeFilter}
                 onChange={e => setSelectedTypeFilter(e.target.value)}
-                className="px-3 py-1 bg-canvas border border-divider rounded-lg text-xs text-primary focus:outline-none"
+                className="px-3 py-1 bg-canvas border border-divider rounded-lg text-xs text-primary focus:outline-none [&>option]:bg-surface [&>option]:text-primary dark:[color-scheme:dark]"
                 aria-label="Filter charts by Stoppage Type"
               >
-                <option value="all">All Types (All Colors)</option>
+                <option value="all" className="bg-surface text-primary">All Types (All Colors)</option>
                 {DOWNTIME_TYPES.map(t => (
-                  <option key={t.id} value={t.name}>{t.name}</option>
+                  <option key={t.id} value={t.name} className="bg-surface text-primary">{t.name}</option>
                 ))}
               </select>
             </div>
@@ -2147,10 +2147,10 @@ export default function MachineHealthAnalytics() {
                   <select
                     value={draftMachine}
                     onChange={e => setDraftMachine(e.target.value)}
-                    className="w-full bg-surface border border-divider rounded-lg px-3 py-2 text-xs text-primary focus:outline-none focus:border-blue-500"
+                    className="w-full bg-surface border border-divider rounded-lg px-3 py-2 text-xs text-primary focus:outline-none focus:border-blue-500 [&>option]:bg-surface [&>option]:text-primary dark:[color-scheme:dark]"
                   >
                     {machineList.map(m => (
-                      <option key={m} value={m}>{m}</option>
+                      <option key={m} value={m} className="bg-surface text-primary">{m}</option>
                     ))}
                   </select>
                 </div>
@@ -2255,10 +2255,10 @@ export default function MachineHealthAnalytics() {
                             updated[idx].type = e.target.value;
                             setDraftSubReasons(updated);
                           }}
-                          className="w-full bg-canvas border border-divider rounded-lg px-2 py-1.5 text-xs font-bold text-primary focus:outline-none"
+                          className="w-full bg-canvas border border-divider rounded-lg px-2 py-1.5 text-xs font-bold text-primary focus:outline-none [&>option]:bg-surface [&>option]:text-primary dark:[color-scheme:dark]"
                         >
                           {DOWNTIME_TYPES.map(t => (
-                            <option key={t.id} value={t.name}>{t.name}</option>
+                            <option key={t.id} value={t.name} className="bg-surface text-primary">{t.name}</option>
                           ))}
                         </select>
                       </div>
