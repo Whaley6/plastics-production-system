@@ -28,7 +28,15 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronsLeft,
-  ChevronsRight
+  ChevronsRight,
+  Gauge,
+  Zap,
+  Award,
+  TrendingUp,
+  Settings2,
+  ShieldCheck,
+  Percent,
+  RefreshCw
 } from 'lucide-react';
 import { 
   AreaChart, 
@@ -56,7 +64,15 @@ import {
   splitReasonsText, 
   guessTypeFromReasonText,
   sortMachineNames,
-  INITIAL_DOWNTIME_RECORDS 
+  INITIAL_DOWNTIME_RECORDS,
+  DailyProductionRecord,
+  DayOeeResult,
+  MonthOeeSummary,
+  CAPABILITY_EXCLUDED_CATEGORIES,
+  isCapabilityExclusionReason,
+  calculateDayOee,
+  calculateMonthOee,
+  INITIAL_DAILY_PRODUCTION 
 } from '../types/machineHealth';
 import { 
   parseExcelDowntimeFile, 
@@ -192,6 +208,28 @@ export default function MachineHealthAnalytics() {
   } | null>(null);
 
   const [isExporting, setIsExporting] = useState<boolean>(false);
+
+  // Machine Capabilities configuration (e.g. MK 1 = 23,000 pcs / day)
+  const [machineCapabilities, setMachineCapabilities] = useLocalStorage<Record<string, number>>(
+    'machine_capabilities_v1',
+    { 'MK 1': 23000 }
+  );
+
+  // Daily Production & Waste data (persisted per machine and date)
+  const [dailyProductionData, setDailyProductionData] = useLocalStorage<Record<string, Record<string, DailyProductionRecord>>>(
+    'machine_daily_production_v2',
+    INITIAL_DAILY_PRODUCTION
+  );
+
+  // OEE Configuration Modal state
+  const [isOeeConfigModalOpen, setIsOeeConfigModalOpen] = useState<boolean>(false);
+  const [oeeModalTab, setOeeModalTab] = useState<'single' | 'month'>('single');
+  const [oeeDraftDate, setOeeDraftDate] = useState<string>('25/09/2026');
+  const [oeeDraftProd, setOeeDraftProd] = useState<number>(15582);
+  const [oeeDraftWaste, setOeeDraftWaste] = useState<number>(632);
+  const [oeeDraftRunTime, setOeeDraftRunTime] = useState<number>(1245);
+  const [oeeDraftIsWorking, setOeeDraftIsWorking] = useState<boolean>(true);
+  const [oeeDraftCapability, setOeeDraftCapability] = useState<number>(23000);
 
   const getRecordKey = (r: DowntimeRecord) => r.id || `${r.machineName}_${r.date}`;
 
@@ -434,6 +472,229 @@ export default function MachineHealthAnalytics() {
     if (selectedTypeFilter === 'all') return totalMinutes;
     return timelineData.reduce((sum, d) => sum + d.minutes, 0);
   }, [selectedTypeFilter, timelineData, totalMinutes]);
+
+  // ==========================================
+  // OEE CALCULATION ENGINE & MEMOIZATIONS
+  // ==========================================
+
+  // Active Machine nominal daily capability (defaults to 23,000 pcs / day)
+  const activeMachineCapability = machineCapabilities[selectedMachine] || 23000;
+
+  // Active machine's daily production map (date => DailyProductionRecord)
+  const machineProductionMap = useMemo(() => {
+    return dailyProductionData[selectedMachine] || {};
+  }, [dailyProductionData, selectedMachine]);
+
+  // Is viewing a single specific day?
+  const isSingleDayView = selectedDayFilter !== 'all';
+
+  // Map of all downtime records by date for fast lookup
+  const downtimeMap = useMemo(() => {
+    const map = new Map<string, DowntimeRecord>();
+    machineRecords.forEach(r => {
+      if (r.date) map.set(r.date, r);
+    });
+    return map;
+  }, [machineRecords]);
+
+  // Distinct dates in the current month scope (combining downtime records and production logs)
+  const currentMonthCalendarDates = useMemo(() => {
+    const datesSet = new Set<string>();
+    machineRecords.forEach(r => {
+      const { monthKey } = parseRecordDate(r.date);
+      if (selectedMonthFilter === 'all' || monthKey === selectedMonthFilter) {
+        if (r.date) datesSet.add(r.date);
+      }
+    });
+    Object.keys(machineProductionMap).forEach(d => {
+      const { monthKey } = parseRecordDate(d);
+      if (selectedMonthFilter === 'all' || monthKey === selectedMonthFilter) {
+        datesSet.add(d);
+      }
+    });
+    return Array.from(datesSet).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  }, [machineRecords, machineProductionMap, selectedMonthFilter]);
+
+  // Month-level OEE summary (calculates average ONLY across operational working days!)
+  // Non-working/stopped days are NOT counted as 0; they are excluded from the denominator.
+  const monthOeeSummary = useMemo(() => {
+    return calculateMonthOee(
+      currentMonthCalendarDates,
+      downtimeMap,
+      machineProductionMap,
+      activeMachineCapability
+    );
+  }, [currentMonthCalendarDates, downtimeMap, machineProductionMap, activeMachineCapability]);
+
+  // Active single-day OEE result (when a specific day is selected)
+  const singleDayOeeResult = useMemo(() => {
+    if (!isSingleDayView) return null;
+    // Find target date matching selectedDayFilter
+    const targetDate = dateScopedRecords[0]?.date || 
+      (availableDays.find(d => d.key === selectedDayFilter)?.dateStr) || 
+      currentMonthCalendarDates.find(d => {
+        const { day } = parseRecordDate(d);
+        return day === selectedDayFilter || d === selectedDayFilter;
+      }) || selectedDayFilter;
+
+    const rec = downtimeMap.get(targetDate);
+    const prod = machineProductionMap[targetDate];
+    return calculateDayOee(targetDate, rec, prod, activeMachineCapability);
+  }, [isSingleDayView, dateScopedRecords, availableDays, selectedDayFilter, currentMonthCalendarDates, downtimeMap, machineProductionMap, activeMachineCapability]);
+
+  // Active OEE values for display (switches between single day vs month average)
+  const displayedOee = isSingleDayView
+    ? (singleDayOeeResult?.oee || 0)
+    : monthOeeSummary.averageOee;
+
+  const displayedAvailability = isSingleDayView
+    ? (singleDayOeeResult?.availability || 0)
+    : monthOeeSummary.averageAvailability;
+
+  const displayedPerformance = isSingleDayView
+    ? (singleDayOeeResult?.performance || 0)
+    : monthOeeSummary.averagePerformance;
+
+  const displayedQuality = isSingleDayView
+    ? (singleDayOeeResult?.quality || 0)
+    : monthOeeSummary.averageQuality;
+
+  const displayedGoodProd = isSingleDayView
+    ? (singleDayOeeResult?.goodProduction || 0)
+    : monthOeeSummary.totalGoodProduction;
+
+  const displayedWaste = isSingleDayView
+    ? (singleDayOeeResult?.waste || 0)
+    : monthOeeSummary.totalWaste;
+
+  const displayedRunTime = isSingleDayView
+    ? (singleDayOeeResult?.runTimeMinutes || 0)
+    : monthOeeSummary.totalRunTimeMinutes;
+
+  const displayedPlannedTime = isSingleDayView
+    ? (singleDayOeeResult?.plannedMinutes || 1440)
+    : Math.max(0, (monthOeeSummary.workingDaysCount * 1440) - monthOeeSummary.totalExcludedMinutes);
+
+  const displayedExpectedOutput = isSingleDayView
+    ? Math.round(displayedRunTime * (activeMachineCapability / 1440))
+    : Math.round(monthOeeSummary.totalRunTimeMinutes * (activeMachineCapability / 1440));
+
+  const displayedExcludedMins = isSingleDayView
+    ? (singleDayOeeResult?.excludedDowntimeMinutes || 0)
+    : monthOeeSummary.totalExcludedMinutes;
+
+  const displayedExcludedReduction = isSingleDayView
+    ? (singleDayOeeResult?.capabilityReduction || 0)
+    : Math.round((monthOeeSummary.totalExcludedMinutes / 1440) * activeMachineCapability);
+
+  const displayedAdjCap = isSingleDayView
+    ? (singleDayOeeResult?.adjustedCapability || activeMachineCapability)
+    : monthOeeSummary.totalAdjustedCapability;
+
+  const displayedExcludedReasonNames = isSingleDayView
+    ? singleDayOeeResult?.excludedReasons.join(', ')
+    : '';
+
+  const activeDateLabel = isSingleDayView
+    ? (singleDayOeeResult?.date || `Day ${selectedDayFilter}`)
+    : 'Selected Scope';
+
+  const getOeeColor = (val: number) => {
+    if (val >= 80) return '#10B981'; // Emerald
+    if (val >= 65) return '#F59E0B'; // Amber
+    return '#EF4444'; // Rose
+  };
+
+  // Open OEE modal helper
+  const handleOpenOeeConfig = (targetDate?: string) => {
+    const dateToUse = targetDate || (isSingleDayView ? (singleDayOeeResult?.date || '25/09/2026') : '25/09/2026');
+    setOeeDraftDate(dateToUse);
+    const existing = machineProductionMap[dateToUse] || {
+      production: 15582,
+      waste: 632,
+      customRunTimeMinutes: 1245,
+      isWorkingDay: true
+    };
+    setOeeDraftProd(existing.production);
+    setOeeDraftWaste(existing.waste);
+    setOeeDraftRunTime(existing.customRunTimeMinutes ?? 1245);
+    setOeeDraftIsWorking(existing.isWorkingDay);
+    setOeeDraftCapability(activeMachineCapability);
+    setIsOeeConfigModalOpen(true);
+  };
+
+  const handleOeeModalDateChange = (newDate: string) => {
+    setOeeDraftDate(newDate);
+    const existing = machineProductionMap[newDate] || {
+      production: 15582,
+      waste: 632,
+      customRunTimeMinutes: 1245,
+      isWorkingDay: true
+    };
+    setOeeDraftProd(existing.production);
+    setOeeDraftWaste(existing.waste);
+    setOeeDraftRunTime(existing.customRunTimeMinutes ?? 1245);
+    setOeeDraftIsWorking(existing.isWorkingDay);
+  };
+
+  const handleAutoFillRunTime = () => {
+    const rec = downtimeMap.get(oeeDraftDate);
+    const downtime = Number(rec?.totalDowntimeMinutes) || 0;
+    setOeeDraftRunTime(Math.max(0, 1440 - downtime));
+  };
+
+  const handleSaveOeeConfig = () => {
+    setMachineCapabilities(prev => ({
+      ...prev,
+      [selectedMachine]: Number(oeeDraftCapability) || 23000
+    }));
+
+    setDailyProductionData(prev => {
+      const machineData = { ...(prev[selectedMachine] || {}) };
+      machineData[oeeDraftDate] = {
+        production: Number(oeeDraftProd) || 0,
+        waste: Number(oeeDraftWaste) || 0,
+        customRunTimeMinutes: Number(oeeDraftRunTime) || 0,
+        isWorkingDay: oeeDraftIsWorking
+      };
+      return { ...prev, [selectedMachine]: machineData };
+    });
+
+    logAction('OEE Updated', `Updated capability (${oeeDraftCapability}) and production for ${selectedMachine} on ${oeeDraftDate}`, 'info');
+    setIsOeeConfigModalOpen(false);
+  };
+
+  const handleToggleDayWorking = (dateKey: string, currentVal: boolean) => {
+    setDailyProductionData(prev => {
+      const machineData = { ...(prev[selectedMachine] || {}) };
+      const current = machineData[dateKey] || { production: 15582, waste: 632, customRunTimeMinutes: 1245, isWorkingDay: true };
+      machineData[dateKey] = {
+        ...current,
+        isWorkingDay: !currentVal,
+        production: !currentVal ? (current.production || 15582) : 0,
+        waste: !currentVal ? (current.waste || 632) : 0,
+        customRunTimeMinutes: !currentVal ? (current.customRunTimeMinutes || 1245) : 0
+      };
+      return { ...prev, [selectedMachine]: machineData };
+    });
+  };
+
+  const handleResetOeeToBenchmark = () => {
+    setMachineCapabilities(prev => ({
+      ...prev,
+      [selectedMachine]: 23000
+    }));
+    setDailyProductionData(prev => ({
+      ...prev,
+      [selectedMachine]: INITIAL_DAILY_PRODUCTION['MK 1'] || {}
+    }));
+    setOeeDraftCapability(23000);
+    setOeeDraftProd(15582);
+    setOeeDraftWaste(632);
+    setOeeDraftRunTime(1245);
+    setOeeDraftIsWorking(true);
+    logAction('OEE Reset', `Reset ${selectedMachine} production benchmark to 26 working days & 4 stopped days`, 'info');
+  };
 
   // Handle live typing in the "Combined Reasons with +" box
   const handleCombinedReasonsChange = (val: string) => {
@@ -1642,6 +1903,247 @@ export default function MachineHealthAnalytics() {
                 </AreaChart>
               </ResponsiveContainer>
             </div>
+
+            {/* ============================================================== */}
+            {/* OVERALL EQUIPMENT EFFECTIVENESS (OEE) ENGINE                   */}
+            {/* ============================================================== */}
+            <div className="mt-5 pt-4 border-t border-divider/80">
+              {/* OEE Header */}
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-blue-400 shrink-0">
+                    <Gauge className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-bold text-primary flex items-center gap-1.5">
+                        <span>Overall Equipment Effectiveness (OEE)</span>
+                      </h3>
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                        displayedOee >= 80 
+                          ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' 
+                          : displayedOee >= 65 
+                          ? 'bg-amber-500/15 text-amber-400 border-amber-500/30' 
+                          : 'bg-rose-500/15 text-rose-400 border-rose-500/30'
+                      }`}>
+                        {displayedOee >= 80 ? 'World Class / Excellent' : displayedOee >= 65 ? 'Operational Target' : 'Needs Optimization'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-tertiary">
+                      {isSingleDayView 
+                        ? `Daily operational performance for ${activeDateLabel}`
+                        : `Monthly Average across ${monthOeeSummary.workingDaysCount} working days (${monthOeeSummary.stoppedDaysCount} stopped days excluded)`}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {isSingleDayView && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedDayFilter('all')}
+                      className="px-2.5 py-1 text-xs text-blue-400 hover:text-blue-300 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 rounded-lg transition-colors cursor-pointer flex items-center gap-1"
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                      <span>View Month Average</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => handleOpenOeeConfig()}
+                    className="px-3 py-1.5 text-xs font-semibold text-primary bg-surface hover:bg-surface-elevated border border-divider hover:border-blue-500/40 rounded-lg transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Settings2 className="w-3.5 h-3.5 text-blue-400" />
+                    <span>Configure OEE & Production</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* 4 Cards: OEE, Availability, Performance, Quality */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {/* 1. Overall OEE Card */}
+                <div className="bg-canvas border border-divider rounded-xl p-3.5 flex flex-col justify-between shadow-xs relative overflow-hidden group hover:border-blue-500/40 transition-colors">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[11px] font-bold text-tertiary uppercase tracking-wider">Overall OEE</span>
+                    <Percent className="w-3.5 h-3.5 text-blue-400" />
+                  </div>
+                  <div className="my-1">
+                    <div className="text-2xl font-black font-mono tracking-tight tabular-nums" style={{ color: getOeeColor(displayedOee) }}>
+                      {displayedOee.toFixed(1)}%
+                    </div>
+                    <div className="w-full bg-surface-elevated h-1.5 rounded-full mt-2 overflow-hidden">
+                      <div 
+                        className="h-full rounded-full transition-all duration-500" 
+                        style={{ width: `${Math.min(100, Math.max(0, displayedOee))}%`, backgroundColor: getOeeColor(displayedOee) }}
+                      />
+                    </div>
+                  </div>
+                  <div className="text-[10px] text-tertiary mt-1 flex justify-between items-center">
+                    <span>A × P × Q</span>
+                    <span className="font-mono font-medium text-secondary">Target: 80%+</span>
+                  </div>
+                </div>
+
+                {/* 2. Availability (A) Card */}
+                <div className="bg-canvas border border-divider rounded-xl p-3.5 flex flex-col justify-between shadow-xs relative overflow-hidden group hover:border-blue-500/40 transition-colors">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[11px] font-bold text-tertiary uppercase tracking-wider">Availability (A)</span>
+                    <Clock className="w-3.5 h-3.5 text-sky-400" />
+                  </div>
+                  <div className="my-1">
+                    <div className="text-2xl font-black font-mono tracking-tight text-sky-400 tabular-nums">
+                      {displayedAvailability.toFixed(1)}%
+                    </div>
+                    <div className="w-full bg-surface-elevated h-1.5 rounded-full mt-2 overflow-hidden">
+                      <div 
+                        className="h-full bg-sky-500 rounded-full transition-all duration-500" 
+                        style={{ width: `${Math.min(100, Math.max(0, displayedAvailability))}%` }}
+                      />
+                    </div>
+                  </div>
+                  <div className="text-[10px] text-tertiary mt-1 flex justify-between items-center">
+                    <span className="font-mono">{displayedRunTime.toLocaleString()}m run</span>
+                    <span className="font-mono text-secondary">/ {displayedPlannedTime.toLocaleString()}m plan</span>
+                  </div>
+                </div>
+
+                {/* 3. Performance (P) Card */}
+                <div className="bg-canvas border border-divider rounded-xl p-3.5 flex flex-col justify-between shadow-xs relative overflow-hidden group hover:border-amber-500/40 transition-colors">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[11px] font-bold text-tertiary uppercase tracking-wider">Performance (P)</span>
+                    <Zap className="w-3.5 h-3.5 text-amber-400" />
+                  </div>
+                  <div className="my-1">
+                    <div className="text-2xl font-black font-mono tracking-tight text-amber-400 tabular-nums">
+                      {displayedPerformance.toFixed(1)}%
+                    </div>
+                    <div className="w-full bg-surface-elevated h-1.5 rounded-full mt-2 overflow-hidden">
+                      <div 
+                        className="h-full bg-amber-500 rounded-full transition-all duration-500" 
+                        style={{ width: `${Math.min(100, Math.max(0, displayedPerformance))}%` }}
+                      />
+                    </div>
+                  </div>
+                  <div className="text-[10px] text-tertiary mt-1 flex justify-between items-center">
+                    <span className="font-mono">{(displayedGoodProd + displayedWaste).toLocaleString()} pcs</span>
+                    <span className="font-mono text-secondary">/ {displayedExpectedOutput.toLocaleString()} exp</span>
+                  </div>
+                </div>
+
+                {/* 4. Quality (Q) Card */}
+                <div className="bg-canvas border border-divider rounded-xl p-3.5 flex flex-col justify-between shadow-xs relative overflow-hidden group hover:border-emerald-500/40 transition-colors">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[11px] font-bold text-tertiary uppercase tracking-wider">Quality (Q)</span>
+                    <Award className="w-3.5 h-3.5 text-emerald-400" />
+                  </div>
+                  <div className="my-1">
+                    <div className="text-2xl font-black font-mono tracking-tight text-emerald-400 tabular-nums">
+                      {displayedQuality.toFixed(1)}%
+                    </div>
+                    <div className="w-full bg-surface-elevated h-1.5 rounded-full mt-2 overflow-hidden">
+                      <div 
+                        className="h-full bg-emerald-500 rounded-full transition-all duration-500" 
+                        style={{ width: `${Math.min(100, Math.max(0, displayedQuality))}%` }}
+                      />
+                    </div>
+                  </div>
+                  <div className="text-[10px] text-tertiary mt-1 flex justify-between items-center">
+                    <span className="font-mono text-emerald-400">{displayedGoodProd.toLocaleString()} good</span>
+                    <span className="font-mono text-rose-400">{displayedWaste.toLocaleString()} waste</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Machine Capability Adjustment Banner (User Rule Callout) */}
+              <div className="mt-3 p-3 bg-canvas/80 border border-divider rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-3">
+                  <div className="w-7 h-7 rounded-lg bg-purple-500/15 border border-purple-500/30 flex items-center justify-center text-purple-400 shrink-0">
+                    <Sliders className="w-3.5 h-3.5" />
+                  </div>
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-bold text-primary">Daily Machine Capability:</span>
+                      <span className="font-mono font-bold text-secondary">{activeMachineCapability.toLocaleString()} pcs/day</span>
+                      <span className="text-tertiary font-mono">({(activeMachineCapability / 24).toFixed(1)}/hr)</span>
+                      {displayedExcludedReduction > 0 && (
+                        <>
+                          <span className="text-tertiary">➜</span>
+                          <span className="text-rose-400 font-mono font-bold">-{displayedExcludedReduction.toLocaleString()} pcs</span>
+                          <span className="text-tertiary">➜</span>
+                          <span className="text-emerald-400 font-mono font-bold">Adjusted: {displayedAdjCap.toLocaleString()} pcs</span>
+                        </>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-tertiary mt-0.5">
+                      {displayedExcludedMins > 0 ? (
+                        <span>
+                          <span className="text-amber-400 font-semibold">{displayedExcludedMins} min ({(displayedExcludedMins / 60).toFixed(1)} hrs)</span> excluded via reasons ({displayedExcludedReasonNames || 'مولدة, etc.'})
+                        </span>
+                      ) : (
+                        <span>No capability-reducing stop reasons recorded. Full capability retained.</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                  <span className="text-[11px] px-2 py-0.5 rounded-md bg-surface border border-divider text-secondary font-mono">
+                    {isSingleDayView ? `Run: ${displayedRunTime}m` : `${monthOeeSummary.workingDaysCount} Days Active`}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenOeeConfig()}
+                    className="text-xs text-blue-400 hover:text-blue-300 font-semibold cursor-pointer underline"
+                  >
+                    Edit
+                  </button>
+                </div>
+              </div>
+
+              {/* Month Daily Trend Strip (Visible when viewing month average) */}
+              {!isSingleDayView && monthOeeSummary.dailyResults.length > 0 && (
+                <div className="mt-3 pt-2.5 border-t border-divider/60">
+                  <div className="flex items-center justify-between mb-1.5 text-[11px]">
+                    <span className="font-semibold text-secondary flex items-center gap-1.5">
+                      <TrendingUp className="w-3 h-3 text-blue-400" />
+                      <span>Daily OEE Breakdown across month:</span>
+                    </span>
+                    <span className="text-tertiary">
+                      Click any day to view its detailed OEE breakdown
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-10 sm:grid-cols-15 md:grid-cols-30 gap-1">
+                    {monthOeeSummary.dailyResults.map((dayRes) => {
+                      const { day } = parseRecordDate(dayRes.date);
+                      const isStopped = !dayRes.isWorkingDay;
+
+                      return (
+                        <button
+                          key={dayRes.date}
+                          type="button"
+                          onClick={() => setSelectedDayFilter(day || dayRes.date)}
+                          title={`${dayRes.date}: ${isStopped ? 'STOPPED (Excluded from average)' : `OEE: ${dayRes.oee.toFixed(1)}%`}`}
+                          className={`flex flex-col items-center justify-center p-1 rounded-md border text-[10px] transition-all cursor-pointer ${
+                            isStopped
+                              ? 'bg-surface-elevated/40 border-dashed border-divider text-tertiary hover:border-amber-500/50'
+                              : dayRes.oee >= 80
+                              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
+                              : dayRes.oee >= 65
+                              ? 'bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20'
+                              : 'bg-rose-500/10 border-rose-500/30 text-rose-400 hover:bg-rose-500/20'
+                          }`}
+                        >
+                          <span className="font-mono font-bold text-[9px]">{day ? parseInt(day, 10) : ''}</span>
+                          <span className="font-mono text-[9px] tabular-nums">
+                            {isStopped ? '⏸️' : `${dayRes.oee.toFixed(0)}%`}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Downtime by Rainbow Type (Right side) */}
@@ -2304,6 +2806,389 @@ export default function MachineHealthAnalytics() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* OEE CONFIGURATION & PRODUCTION MODAL */}
+      {isOeeConfigModalOpen && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-canvas border border-divider rounded-2xl shadow-2xl max-w-3xl w-full flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="px-6 py-4 border-b border-divider flex justify-between items-center bg-surface/70">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-blue-400 shrink-0">
+                  <Settings2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-primary">
+                    OEE & Production Configuration — {selectedMachine}
+                  </h3>
+                  <p className="text-xs text-tertiary">
+                    Set daily production, waste, operational status, and baseline capability deductions.
+                  </p>
+                </div>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setIsOeeConfigModalOpen(false)}
+                className="p-1 hover:bg-surface-elevated rounded-lg text-tertiary hover:text-primary transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Scrollable Body */}
+            <div className="p-6 space-y-5 overflow-y-auto flex-1">
+              {/* Machine Capability Setting Box */}
+              <div className="p-4 bg-surface border border-divider rounded-xl space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-primary mb-0.5">
+                      Machine Nominal Daily Capability (24 Hours)
+                    </label>
+                    <p className="text-[11px] text-tertiary">
+                      Target production capacity per 24 hours at standard cycle speed.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="relative w-36">
+                      <input
+                        type="number"
+                        min="1"
+                        value={oeeDraftCapability}
+                        onChange={e => setOeeDraftCapability(Math.max(1, Number(e.target.value) || 0))}
+                        className="w-full bg-canvas border border-divider rounded-lg px-3 py-1.5 text-xs font-mono font-bold text-primary focus:outline-none focus:border-blue-500 text-right pr-9"
+                      />
+                      <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-tertiary font-medium">pcs</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-secondary bg-surface-elevated/40 p-2.5 rounded-lg font-mono">
+                  <span>Hourly Rate: <strong className="text-primary font-bold">{(oeeDraftCapability / 24).toFixed(1)} pcs/hr</strong></span>
+                  <span>•</span>
+                  <span>Minute Rate: <strong className="text-primary font-bold">{(oeeDraftCapability / 1440).toFixed(2)} pcs/min</strong></span>
+                  <span>•</span>
+                  <span className="text-[11px] text-tertiary">2h Stop = -{Math.round((120 / 1440) * oeeDraftCapability).toLocaleString()} pcs deduction</span>
+                </div>
+
+                <div className="text-[11px] text-tertiary leading-relaxed bg-blue-500/5 border border-blue-500/20 p-2.5 rounded-lg flex items-start gap-2">
+                  <Info className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+                  <span>
+                    <strong>Rule-Based Deductions:</strong> When stoppages occur due to external/operational reasons (<span className="text-blue-300">مولدة, لا توجد طلبية, بداية تشغيل, لا يوجد عمال, لا يوجد ليبل, لا توجد حبيبات, امبول, UPS, مكمبريسر, Chiller, اخرى</span>), their duration is excluded from the machine's daily capability instead of penalizing availability.
+                  </span>
+                </div>
+              </div>
+
+              {/* Tab Selector: Single Day vs Month Batch Table */}
+              <div className="flex items-center gap-1 p-1 bg-surface border border-divider rounded-lg">
+                <button
+                  type="button"
+                  onClick={() => setOeeModalTab('single')}
+                  className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer ${
+                    oeeModalTab === 'single'
+                      ? 'bg-surface-elevated text-primary font-bold shadow-xs'
+                      : 'text-tertiary hover:text-secondary'
+                  }`}
+                >
+                  Edit Single Day Record
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOeeModalTab('month')}
+                  className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer ${
+                    oeeModalTab === 'month'
+                      ? 'bg-surface-elevated text-primary font-bold shadow-xs'
+                      : 'text-tertiary hover:text-secondary'
+                  }`}
+                >
+                  Full Month Overview & Status ({currentMonthCalendarDates.length} Days)
+                </button>
+              </div>
+
+              {/* TAB 1: SINGLE DAY EDIT */}
+              {oeeModalTab === 'single' && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {/* Target Date Picker */}
+                    <div>
+                      <label className="block text-xs font-semibold text-secondary mb-1">Target Date</label>
+                      <select
+                        value={oeeDraftDate}
+                        onChange={e => handleOeeModalDateChange(e.target.value)}
+                        className="w-full bg-surface border border-divider rounded-lg px-3 py-2 text-xs font-mono font-bold text-primary focus:outline-none focus:border-blue-500 [&>option]:bg-surface [&>option]:text-primary dark:[color-scheme:dark]"
+                      >
+                        {currentMonthCalendarDates.map(d => {
+                          const { day } = parseRecordDate(d);
+                          return (
+                            <option key={d} value={d}>
+                              {d} {day ? `(Day ${parseInt(day, 10)})` : ''}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </div>
+
+                    {/* Operational Status Toggle */}
+                    <div>
+                      <label className="block text-xs font-semibold text-secondary mb-1">Machine Operational Status</label>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setOeeDraftIsWorking(true)}
+                          className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold border transition-all cursor-pointer ${
+                            oeeDraftIsWorking
+                              ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-400 shadow-xs'
+                              : 'bg-surface border-divider text-tertiary hover:text-secondary'
+                          }`}
+                        >
+                          🟢 Working Day (Active)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setOeeDraftIsWorking(false);
+                            setOeeDraftProd(0);
+                            setOeeDraftWaste(0);
+                            setOeeDraftRunTime(0);
+                          }}
+                          className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold border transition-all cursor-pointer ${
+                            !oeeDraftIsWorking
+                              ? 'bg-rose-500/15 border-rose-500/40 text-rose-400 shadow-xs'
+                              : 'bg-surface border-divider text-tertiary hover:text-secondary'
+                          }`}
+                        >
+                          ⏸️ Stopped Day (Exclude from Avg)
+                        </button>
+                      </div>
+                      <p className="text-[10px] text-tertiary mt-1">
+                        {!oeeDraftIsWorking
+                          ? 'Excluded from monthly average denominator (will NOT count as 0%).'
+                          : 'Operational day included in the monthly average calculation.'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Production & Waste Inputs (enabled if working) */}
+                  {oeeDraftIsWorking ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-secondary mb-1">Good Production (pcs)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={oeeDraftProd}
+                          onChange={e => setOeeDraftProd(Math.max(0, Number(e.target.value) || 0))}
+                          className="w-full bg-surface border border-divider rounded-lg px-3 py-2 text-xs font-mono font-bold text-emerald-400 focus:outline-none focus:border-blue-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-secondary mb-1">Waste / Scrap (pcs)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={oeeDraftWaste}
+                          onChange={e => setOeeDraftWaste(Math.max(0, Number(e.target.value) || 0))}
+                          className="w-full bg-surface border border-divider rounded-lg px-3 py-2 text-xs font-mono font-bold text-rose-400 focus:outline-none focus:border-blue-500"
+                        />
+                      </div>
+
+                      <div>
+                        <div className="flex justify-between items-center mb-1">
+                          <label className="text-xs font-semibold text-secondary">Run Time (min)</label>
+                          <button
+                            type="button"
+                            onClick={handleAutoFillRunTime}
+                            className="text-[10px] text-blue-400 hover:text-blue-300 underline cursor-pointer"
+                            title="Auto-calculate: 1440 - Downtime"
+                          >
+                            Auto from Downtime
+                          </button>
+                        </div>
+                        <input
+                          type="number"
+                          min="0"
+                          max="1440"
+                          value={oeeDraftRunTime}
+                          onChange={e => setOeeDraftRunTime(Math.min(1440, Math.max(0, Number(e.target.value) || 0)))}
+                          className="w-full bg-surface border border-divider rounded-lg px-3 py-2 text-xs font-mono font-bold text-sky-400 focus:outline-none focus:border-blue-500"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="p-3 bg-surface-elevated/30 border border-divider rounded-xl text-xs text-tertiary text-center">
+                      Machine was stopped on this day. Production and Run Time set to 0. This day is excluded from monthly average calculation.
+                    </div>
+                  )}
+
+                  {/* Real-Time Preview Card for Draft Date */}
+                  {(() => {
+                    const rec = downtimeMap.get(oeeDraftDate);
+                    const previewResult = calculateDayOee(
+                      oeeDraftDate,
+                      rec,
+                      {
+                        production: oeeDraftProd,
+                        waste: oeeDraftWaste,
+                        customRunTimeMinutes: oeeDraftRunTime,
+                        isWorkingDay: oeeDraftIsWorking
+                      },
+                      oeeDraftCapability
+                    );
+
+                    return (
+                      <div className="p-4 bg-surface border border-divider rounded-xl space-y-3">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-bold text-primary flex items-center gap-1.5">
+                            <Activity className="w-3.5 h-3.5 text-blue-400" />
+                            <span>Live OEE Calculation for {oeeDraftDate}:</span>
+                          </span>
+                          <span className="font-mono font-bold text-sm" style={{ color: getOeeColor(previewResult.oee) }}>
+                            OEE: {previewResult.oee.toFixed(1)}%
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
+                          <div className="p-2 bg-canvas rounded-lg border border-divider">
+                            <span className="text-[10px] text-tertiary block">Availability</span>
+                            <span className="font-mono font-bold text-sky-400">{previewResult.availability.toFixed(1)}%</span>
+                          </div>
+                          <div className="p-2 bg-canvas rounded-lg border border-divider">
+                            <span className="text-[10px] text-tertiary block">Performance</span>
+                            <span className="font-mono font-bold text-amber-400">{previewResult.performance.toFixed(1)}%</span>
+                          </div>
+                          <div className="p-2 bg-canvas rounded-lg border border-divider">
+                            <span className="text-[10px] text-tertiary block">Quality</span>
+                            <span className="font-mono font-bold text-emerald-400">{previewResult.quality.toFixed(1)}%</span>
+                          </div>
+                          <div className="p-2 bg-canvas rounded-lg border border-divider">
+                            <span className="text-[10px] text-tertiary block">Adjusted Cap</span>
+                            <span className="font-mono font-bold text-primary">{previewResult.adjustedCapability.toLocaleString()}</span>
+                          </div>
+                        </div>
+
+                        {previewResult.excludedDowntimeMinutes > 0 && (
+                          <div className="text-[11px] text-amber-300/90 font-mono bg-amber-500/10 border border-amber-500/20 p-2 rounded-lg">
+                            Downtime: {previewResult.totalDowntimeMinutes}m • Excluded: {previewResult.excludedDowntimeMinutes}m ({previewResult.excludedReasons.join(', ')}) • Cap Reduction: -{previewResult.capabilityReduction.toLocaleString()} pcs
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+
+              {/* TAB 2: FULL MONTH OVERVIEW & STATUS TABLE */}
+              {oeeModalTab === 'month' && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between text-xs text-tertiary px-1">
+                    <span>
+                      Active Working Days: <strong className="text-emerald-400 font-bold">{monthOeeSummary.workingDaysCount}</strong> / {currentMonthCalendarDates.length} • 
+                      Stopped Days: <strong className="text-rose-400 font-bold">{monthOeeSummary.stoppedDaysCount}</strong>
+                    </span>
+                    <span className="font-mono">
+                      Month Average OEE: <strong className="text-primary font-bold">{monthOeeSummary.averageOee.toFixed(1)}%</strong>
+                    </span>
+                  </div>
+
+                  <div className="border border-divider rounded-xl overflow-hidden max-h-72 overflow-y-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-surface-elevated/70 text-[11px] text-tertiary sticky top-0 border-b border-divider font-semibold">
+                        <tr>
+                          <th className="py-2 px-3">Date</th>
+                          <th className="py-2 px-2 text-center">Status</th>
+                          <th className="py-2 px-2 text-right">Production</th>
+                          <th className="py-2 px-2 text-right">Waste</th>
+                          <th className="py-2 px-2 text-right">Run (min)</th>
+                          <th className="py-2 px-2 text-right">Adjusted Cap</th>
+                          <th className="py-2 px-3 text-right">OEE</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-divider/50 font-mono">
+                        {currentMonthCalendarDates.map(d => {
+                          const prod = machineProductionMap[d] || {
+                            production: 15582,
+                            waste: 632,
+                            customRunTimeMinutes: 1245,
+                            isWorkingDay: true
+                          };
+                          const rec = downtimeMap.get(d);
+                          const dayRes = calculateDayOee(d, rec, prod, oeeDraftCapability);
+                          const isStopped = !prod.isWorkingDay;
+
+                          return (
+                            <tr key={d} className={`hover:bg-surface-elevated/30 transition-colors ${isStopped ? 'opacity-50 bg-surface-elevated/10' : ''}`}>
+                              <td className="py-2 px-3 font-medium text-primary">
+                                {d}
+                              </td>
+                              <td className="py-2 px-2 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleDayWorking(d, !isStopped)}
+                                  className={`px-2 py-0.5 rounded text-[10px] font-bold border cursor-pointer transition-colors ${
+                                    !isStopped
+                                      ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
+                                      : 'bg-rose-500/15 border-rose-500/30 text-rose-400'
+                                  }`}
+                                >
+                                  {!isStopped ? 'Active' : 'Stopped'}
+                                </button>
+                              </td>
+                              <td className="py-2 px-2 text-right text-emerald-400">
+                                {prod.isWorkingDay ? prod.production.toLocaleString() : '-'}
+                              </td>
+                              <td className="py-2 px-2 text-right text-rose-400">
+                                {prod.isWorkingDay ? prod.waste.toLocaleString() : '-'}
+                              </td>
+                              <td className="py-2 px-2 text-right text-sky-400">
+                                {prod.isWorkingDay ? (prod.customRunTimeMinutes ?? 1245) : '0'}m
+                              </td>
+                              <td className="py-2 px-2 text-right text-secondary">
+                                {dayRes.adjustedCapability.toLocaleString()}
+                              </td>
+                              <td className="py-2 px-3 text-right font-bold" style={{ color: isStopped ? '#94A3B8' : getOeeColor(dayRes.oee) }}>
+                                {isStopped ? 'Excluded' : `${dayRes.oee.toFixed(1)}%`}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Actions Footer */}
+            <div className="px-6 py-3.5 border-t border-divider bg-surface/50 flex flex-wrap justify-between items-center gap-3">
+              <button
+                type="button"
+                onClick={handleResetOeeToBenchmark}
+                className="px-3 py-1.5 bg-surface hover:bg-surface-elevated border border-divider text-amber-400 hover:text-amber-300 rounded-lg text-xs font-medium cursor-pointer transition-colors"
+                title="Reset to 26 working days & 4 stopped days with user numbers (23,000 cap, 15,582 prod, 632 waste, 1,245 run time)"
+              >
+                Reset Factory Benchmark (26 Working Days)
+              </button>
+
+              <div className="flex items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setIsOeeConfigModalOpen(false)}
+                  className="px-4 py-2 bg-surface hover:bg-surface-elevated border border-divider text-secondary rounded-lg text-xs font-medium cursor-pointer transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveOeeConfig}
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold shadow-sm transition-colors cursor-pointer"
+                >
+                  Save Configuration
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

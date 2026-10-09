@@ -548,11 +548,12 @@ export const INITIAL_DOWNTIME_RECORDS: DowntimeRecord[] = [
     machineId: 'mk-1',
     machineName: 'MK 1',
     date: '25/09/2026',
-    rawReasonsText: 'لا يوجد توقف',
+    rawReasonsText: 'توقف كهرباء مولدة + قالب',
     reasons: [
-      { id: '1', reason: 'لا يوجد توقف', durationMinutes: 0, type: 'مولدة' }
+      { id: '1', reason: 'توقف كهرباء مولدة', durationMinutes: 120, type: 'مولدة' },
+      { id: '2', reason: 'بقاء مواد في القالب', durationMinutes: 75, type: 'قالب' }
     ],
-    totalDowntimeMinutes: 0,
+    totalDowntimeMinutes: 195,
     status: 'Resolved'
   },
   {
@@ -619,3 +620,303 @@ export const INITIAL_DOWNTIME_RECORDS: DowntimeRecord[] = [
     status: 'Resolved'
   }
 ];
+
+// ==========================================
+// OEE (OVERALL EQUIPMENT EFFECTIVENESS) TYPES & LOGIC
+// ==========================================
+
+export interface DailyProductionRecord {
+  production: number; // Good pieces, e.g. 15,582
+  waste: number; // Waste/scrap pieces, e.g. 632
+  customRunTimeMinutes?: number; // Optional manual override, default: 1440 - totalDowntime
+  isWorkingDay: boolean; // false if stopped/non-working day (excluded from month average)
+  notes?: string;
+}
+
+export interface DayOeeResult {
+  date: string;
+  isWorkingDay: boolean;
+  totalDowntimeMinutes: number;
+  excludedDowntimeMinutes: number;
+  internalDowntimeMinutes: number;
+  dailyCapability: number;
+  capabilityReduction: number;
+  adjustedCapability: number;
+  runTimeMinutes: number;
+  plannedMinutes: number;
+  goodProduction: number;
+  waste: number;
+  totalProduction: number;
+  availability: number; // 0..100
+  performance: number; // 0..100
+  quality: number; // 0..100
+  oee: number; // 0..100
+  excludedReasons: string[];
+}
+
+export interface MonthOeeSummary {
+  totalCalendarDays: number;
+  workingDaysCount: number;
+  stoppedDaysCount: number;
+  averageOee: number;
+  averageAvailability: number;
+  averagePerformance: number;
+  averageQuality: number;
+  totalGoodProduction: number;
+  totalWaste: number;
+  totalRunTimeMinutes: number;
+  totalDowntimeMinutes: number;
+  totalExcludedMinutes: number;
+  totalAdjustedCapability: number;
+  dailyResults: DayOeeResult[];
+}
+
+/**
+ * 11 Stop Reason Categories that exclude/reduce machine capability:
+ * 1. "لا توجد طلبية"
+ * 2. "مولدة"
+ * 3. "بداية تشغيل"
+ * 4. "لا يوجد عمال"
+ * 5. "لا يوجد ليبل"
+ * 6. "لا توجد حبيبات"
+ * 7. "لا يوجد امبول/فرز امبول"
+ * 8. "UPS"
+ * 9. "مكمبريسر" / "مكومبريسر"
+ * 10. "Chiller"
+ * 11. "اخرى"
+ */
+export const CAPABILITY_EXCLUDED_CATEGORIES = [
+  'لا توجد طلبية',
+  'مولدة',
+  'بداية تشغيل',
+  'لا يوجد عمال',
+  'لا يوجد ليبل',
+  'لا توجد حبيبات',
+  'لا يوجد امبول/فرز امبول',
+  'UPS',
+  'مكمبريسر',
+  'Chiller',
+  'اخرى'
+] as const;
+
+export function isCapabilityExclusionReason(reasonOrType?: string): boolean {
+  if (!reasonOrType) return false;
+  const s = reasonOrType.trim().toLowerCase();
+  
+  if (s.includes('لا توجد طلب') || s.includes('لا يوجد طلب') || s.includes('عدم توفر طلب') || s.includes('عدم وجود طلب') || s.includes('انعدام طلب') || s.includes('بدون طلب') || s.includes('ماكو طلب') || s.includes('no_order')) return true;
+  if (s.includes('مولد') || s.includes('generator')) return true;
+  if (s.includes('بداية تشغيل') || s.includes('startup')) return true;
+  if (s.includes('لا يوجد عمال') || s.includes('عدم توفر عمال') || s.includes('عدم وجود عمال') || s.includes('no_workers')) return true;
+  if (s.includes('لا يوجد ليبل') || s.includes('no_label')) return true;
+  if (s.includes('لا توجد حبيبات') || s.includes('no_granules')) return true;
+  if (s.includes('امبول') || s.includes('فرز امبول') || s.includes('no_preform')) return true;
+  if (s.includes('ups')) return true;
+  if (s.includes('كمبريسر') || s.includes('كومبريسر') || s.includes('compressor')) return true;
+  if (s.includes('chiller') || s.includes('جلر') || s.includes('شلير')) return true;
+  if (s.includes('اخرى') || s.includes('أخرى') || s.includes('other')) return true;
+
+  return false;
+}
+
+/**
+ * Calculates OEE for a single operational day.
+ * Formula:
+ * - Capability Reduction = (Excluded Downtime Minutes / 1440) * Capability
+ * - Adjusted Capability = Capability - Capability Reduction
+ * - Availability (A) = Run Time / (1440 - Excluded Downtime Minutes)
+ * - Performance (P) = (Good Production + Waste) / (Run Time * Capability / 1440)
+ * - Quality (Q) = Good Production / (Good Production + Waste)
+ * - Overall OEE = A * P * Q = Good Production / Adjusted Capability
+ */
+export function calculateDayOee(
+  date: string,
+  downtimeRecord: DowntimeRecord | undefined,
+  productionEntry: DailyProductionRecord | undefined,
+  nominalCapability: number
+): DayOeeResult {
+  const cap = Number(nominalCapability) || 23000;
+  const totalDowntimeMinutes = Number(downtimeRecord?.totalDowntimeMinutes) || 0;
+
+  // Determine if it was a working day
+  const isWorking = productionEntry?.isWorkingDay !== undefined
+    ? productionEntry.isWorkingDay
+    : (totalDowntimeMinutes < 1440);
+
+  // Sum excluded downtime minutes
+  let excludedMins = 0;
+  const excludedReasons: string[] = [];
+  (downtimeRecord?.reasons || []).forEach(sub => {
+    if (isCapabilityExclusionReason(sub.type) || isCapabilityExclusionReason(sub.reason)) {
+      excludedMins += (Number(sub.durationMinutes) || 0);
+      excludedReasons.push(sub.reason || sub.type || '');
+    }
+  });
+
+  // Capability reduction based on user's exact specification:
+  // e.g. 2 hrs (120 min) of مولدة on 23,000 cap = 2 * 958.33 = 1,917 pcs reduction => 21,083 pcs adjusted
+  const capabilityReduction = Math.round((excludedMins / 1440) * cap);
+  const adjustedCapability = Math.max(0, cap - capabilityReduction);
+
+  // Run Time: custom override if user provided, else 1440 - totalDowntimeMinutes
+  let runTimeMinutes = productionEntry?.customRunTimeMinutes !== undefined
+    ? Number(productionEntry.customRunTimeMinutes)
+    : Math.max(0, 1440 - totalDowntimeMinutes);
+
+  if (!isWorking) {
+    runTimeMinutes = 0;
+  }
+
+  const plannedMinutes = Math.max(0, 1440 - excludedMins);
+
+  const goodProduction = isWorking ? (Number(productionEntry?.production) || 0) : 0;
+  const waste = isWorking ? (Number(productionEntry?.waste) || 0) : 0;
+  const totalProduction = goodProduction + waste;
+
+  // Availability = Run Time / Planned Operating Time
+  const availability = plannedMinutes > 0 && isWorking
+    ? Math.min(100, Math.max(0, (runTimeMinutes / plannedMinutes) * 100))
+    : 0;
+
+  // Performance = Total Pieces Produced / Expected Output in Run Time
+  const expectedOutput = runTimeMinutes * (cap / 1440);
+  const performance = expectedOutput > 0 && isWorking
+    ? Math.min(100, Math.max(0, (totalProduction / expectedOutput) * 100))
+    : 0;
+
+  // Quality = Good Production / Total Pieces Produced
+  const quality = totalProduction > 0 && isWorking
+    ? Math.min(100, Math.max(0, (goodProduction / totalProduction) * 100))
+    : (isWorking ? 100 : 0);
+
+  // Overall OEE = A * P * Q = (goodProduction / adjustedCapability) * 100
+  const oee = adjustedCapability > 0 && isWorking
+    ? Math.min(100, Math.max(0, (goodProduction / adjustedCapability) * 100))
+    : 0;
+
+  return {
+    date,
+    isWorkingDay: isWorking,
+    totalDowntimeMinutes,
+    excludedDowntimeMinutes: excludedMins,
+    internalDowntimeMinutes: Math.max(0, totalDowntimeMinutes - excludedMins),
+    dailyCapability: cap,
+    capabilityReduction,
+    adjustedCapability,
+    runTimeMinutes,
+    plannedMinutes,
+    goodProduction,
+    waste,
+    totalProduction,
+    availability,
+    performance,
+    quality,
+    oee,
+    excludedReasons
+  };
+}
+
+/**
+ * Calculates month-level OEE average across OPERATIONAL DAYS ONLY.
+ * Non-working/stopped days are NOT counted as 0; they are excluded from the denominator.
+ * e.g., in a 30-day month with 4 stopped days, average is calculated strictly over 26 days.
+ */
+export function calculateMonthOee(
+  dates: string[],
+  downtimeRecordsMap: Map<string, DowntimeRecord>,
+  dailyProductionMap: Record<string, DailyProductionRecord>,
+  nominalCapability: number
+): MonthOeeSummary {
+  const dailyResults: DayOeeResult[] = dates.map(d => {
+    const rec = downtimeRecordsMap.get(d);
+    const prod = dailyProductionMap[d];
+    return calculateDayOee(d, rec, prod, nominalCapability);
+  });
+
+  const workingDays = dailyResults.filter(d => d.isWorkingDay);
+  const stoppedDays = dailyResults.filter(d => !d.isWorkingDay);
+
+  const averageOee = workingDays.length > 0
+    ? workingDays.reduce((sum, d) => sum + d.oee, 0) / workingDays.length
+    : 0;
+
+  const averageAvailability = workingDays.length > 0
+    ? workingDays.reduce((sum, d) => sum + d.availability, 0) / workingDays.length
+    : 0;
+
+  const averagePerformance = workingDays.length > 0
+    ? workingDays.reduce((sum, d) => sum + d.performance, 0) / workingDays.length
+    : 0;
+
+  const averageQuality = workingDays.length > 0
+    ? workingDays.reduce((sum, d) => sum + d.quality, 0) / workingDays.length
+    : 0;
+
+  const totalGoodProduction = workingDays.reduce((sum, d) => sum + d.goodProduction, 0);
+  const totalWaste = workingDays.reduce((sum, d) => sum + d.waste, 0);
+  const totalRunTimeMinutes = workingDays.reduce((sum, d) => sum + d.runTimeMinutes, 0);
+  const totalDowntimeMinutes = dailyResults.reduce((sum, d) => sum + d.totalDowntimeMinutes, 0);
+  const totalExcludedMinutes = dailyResults.reduce((sum, d) => sum + d.excludedDowntimeMinutes, 0);
+  const totalAdjustedCapability = workingDays.reduce((sum, d) => sum + d.adjustedCapability, 0);
+
+  return {
+    totalCalendarDays: dates.length,
+    workingDaysCount: workingDays.length,
+    stoppedDaysCount: stoppedDays.length,
+    averageOee,
+    averageAvailability,
+    averagePerformance,
+    averageQuality,
+    totalGoodProduction,
+    totalWaste,
+    totalRunTimeMinutes,
+    totalDowntimeMinutes,
+    totalExcludedMinutes,
+    totalAdjustedCapability,
+    dailyResults
+  };
+}
+
+/**
+ * Initial 30-day production dataset for MK 1 (September 2026):
+ * Exactly 26 operational working days and 4 stopped days (Days 5, 13, 22, 24).
+ * Seeded with user's exact figures:
+ * - Waste: 632 pcs
+ * - Production: 15,582 pcs
+ * - Run Time: 1,245 min
+ * - Capability: 23,000 pcs (adjusted to 21,083 on Day 25 with 120m مولدة stop)
+ */
+export const INITIAL_DAILY_PRODUCTION: Record<string, Record<string, DailyProductionRecord>> = {
+  'MK 1': {
+    '01/09/2026': { production: 15582, waste: 632, customRunTimeMinutes: 1245, isWorkingDay: true },
+    '02/09/2026': { production: 15582, waste: 632, customRunTimeMinutes: 1245, isWorkingDay: true },
+    '03/09/2026': { production: 15582, waste: 632, customRunTimeMinutes: 1245, isWorkingDay: true },
+    '04/09/2026': { production: 15582, waste: 632, customRunTimeMinutes: 1245, isWorkingDay: true },
+    '05/09/2026': { production: 0, waste: 0, customRunTimeMinutes: 0, isWorkingDay: false, notes: 'Machine Stopped' }, // STOPPED DAY 1/4
+    '06/09/2026': { production: 15582, waste: 632, customRunTimeMinutes: 1245, isWorkingDay: true },
+    '07/09/2026': { production: 15582, waste: 632, customRunTimeMinutes: 1245, isWorkingDay: true },
+    '08/09/2026': { production: 15582, waste: 632, customRunTimeMinutes: 1245, isWorkingDay: true },
+    '09/09/2026': { production: 15582, waste: 632, customRunTimeMinutes: 1245, isWorkingDay: true },
+    '10/09/2026': { production: 15582, waste: 632, customRunTimeMinutes: 1245, isWorkingDay: true },
+    '11/09/2026': { production: 15582, waste: 632, customRunTimeMinutes: 1245, isWorkingDay: true },
+    '12/09/2026': { production: 15582, waste: 632, customRunTimeMinutes: 1245, isWorkingDay: true },
+    '13/09/2026': { production: 0, waste: 0, customRunTimeMinutes: 0, isWorkingDay: false, notes: 'Maintenance Shutdown' }, // STOPPED DAY 2/4
+    '14/09/2026': { production: 15582, waste: 632, customRunTimeMinutes: 1245, isWorkingDay: true },
+    '15/09/2026': { production: 15582, waste: 632, customRunTimeMinutes: 1245, isWorkingDay: true },
+    '16/09/2026': { production: 15582, waste: 632, customRunTimeMinutes: 1245, isWorkingDay: true },
+    '17/09/2026': { production: 15582, waste: 632, customRunTimeMinutes: 1245, isWorkingDay: true },
+    '18/09/2026': { production: 15582, waste: 632, customRunTimeMinutes: 1245, isWorkingDay: true },
+    '19/09/2026': { production: 15582, waste: 632, customRunTimeMinutes: 1245, isWorkingDay: true },
+    '20/09/2026': { production: 15582, waste: 632, customRunTimeMinutes: 1245, isWorkingDay: true },
+    '21/09/2026': { production: 15582, waste: 632, customRunTimeMinutes: 1245, isWorkingDay: true },
+    '22/09/2026': { production: 0, waste: 0, customRunTimeMinutes: 0, isWorkingDay: false, notes: 'Power Line Work' }, // STOPPED DAY 3/4
+    '23/09/2026': { production: 15582, waste: 632, customRunTimeMinutes: 1245, isWorkingDay: true },
+    '24/09/2026': { production: 0, waste: 0, customRunTimeMinutes: 0, isWorkingDay: false, notes: 'Full Day Sensor Stoppage (1440m)' }, // STOPPED DAY 4/4
+    '25/09/2026': { production: 15582, waste: 632, customRunTimeMinutes: 1245, isWorkingDay: true }, // User's 2h مولدة test day!
+    '26/09/2026': { production: 15582, waste: 632, customRunTimeMinutes: 1245, isWorkingDay: true },
+    '27/09/2026': { production: 15582, waste: 632, customRunTimeMinutes: 1245, isWorkingDay: true },
+    '28/09/2026': { production: 15582, waste: 632, customRunTimeMinutes: 1245, isWorkingDay: true },
+    '29/09/2026': { production: 15582, waste: 632, customRunTimeMinutes: 1245, isWorkingDay: true },
+    '30/09/2026': { production: 15582, waste: 632, customRunTimeMinutes: 1245, isWorkingDay: true }
+  }
+};
+
