@@ -817,8 +817,39 @@ export function calculateDayOee(
 
 /**
  * Calculates month-level OEE average across OPERATIONAL DAYS ONLY.
+/**
+ * Normalizes date strings to canonical 'DD/MM/YYYY' format to prevent discrepancies
+ * between '1/9/2026' and '01/09/2026' or '2026-09-01'.
+ */
+export function normalizeDateString(dateStr: string): string {
+  if (!dateStr) return '';
+  const s = String(dateStr).trim();
+  const parts = s.split(/[\/\-.]/);
+  if (parts.length >= 3) {
+    let day = '';
+    let month = '';
+    let year = '';
+    if (parts[0].length === 4) {
+      // YYYY-MM-DD
+      year = parts[0];
+      month = parts[1].padStart(2, '0');
+      day = parts[2].padStart(2, '0');
+    } else {
+      // DD/MM/YYYY or D/M/YYYY
+      day = parts[0].padStart(2, '0');
+      month = parts[1].padStart(2, '0');
+      year = parts[2].length === 2 ? `20${parts[2]}` : parts[2];
+    }
+    return `${day}/${month}/${year}`;
+  }
+  return s;
+}
+
+/**
+ * Calculates month-level OEE average across OPERATIONAL DAYS ONLY.
  * Non-working/stopped days are NOT counted as 0; they are excluded from the denominator.
  * e.g., in a 30-day month with 4 stopped days, average is calculated strictly over 26 days.
+ * Deduplicates any input dates so that date formatting differences (e.g. 1/9/2026 vs 01/09/2026) never cause duplicate days.
  */
 export function calculateMonthOee(
   dates: string[],
@@ -826,10 +857,70 @@ export function calculateMonthOee(
   dailyProductionMap: Record<string, DailyProductionRecord>,
   nominalCapability: number
 ): MonthOeeSummary {
-  const dailyResults: DayOeeResult[] = dates.map(d => {
-    const rec = downtimeRecordsMap.get(d);
-    const prod = dailyProductionMap[d];
-    return calculateDayOee(d, rec, prod, nominalCapability);
+  // Deduplicate dates by their canonical normalized format
+  const seenDates = new Set<string>();
+  const normalizedDates: string[] = [];
+
+  dates.forEach(d => {
+    const norm = normalizeDateString(d);
+    if (norm && !seenDates.has(norm)) {
+      seenDates.add(norm);
+      normalizedDates.push(norm);
+    }
+  });
+
+  // Sort canonically by numeric day: 1, 2, 3 ... 30
+  normalizedDates.sort((a, b) => {
+    const dayA = parseInt(a.split('/')[0], 10) || 0;
+    const dayB = parseInt(b.split('/')[0], 10) || 0;
+    return dayA - dayB;
+  });
+
+  // Pre-build normalized lookup maps for both downtime records and production entries
+  const normalizedDowntimeMap = new Map<string, DowntimeRecord>();
+  downtimeRecordsMap.forEach((rec, key) => {
+    const normKey = normalizeDateString(rec.date || key);
+    if (normKey) {
+      normalizedDowntimeMap.set(normKey, rec);
+    }
+    normalizedDowntimeMap.set(key, rec);
+  });
+
+  const normalizedProdMap: Record<string, DailyProductionRecord> = {};
+  Object.entries(dailyProductionMap || {}).forEach(([key, prod]) => {
+    const normKey = normalizeDateString(key);
+    if (normKey) {
+      normalizedProdMap[normKey] = prod;
+    }
+    normalizedProdMap[key] = prod;
+  });
+
+  const dailyResults: DayOeeResult[] = normalizedDates.map(normDate => {
+    // Find record by normalized date, raw date, or day number match
+    let rec = normalizedDowntimeMap.get(normDate);
+    if (!rec) {
+      const dayNum = parseInt(normDate.split('/')[0], 10);
+      for (const [k, r] of normalizedDowntimeMap.entries()) {
+        if (parseInt(normalizeDateString(r.date || k).split('/')[0], 10) === dayNum) {
+          rec = r;
+          break;
+        }
+      }
+    }
+
+    // Find production by normalized date or day number match
+    let prod = normalizedProdMap[normDate];
+    if (!prod) {
+      const dayNum = parseInt(normDate.split('/')[0], 10);
+      for (const [k, p] of Object.entries(normalizedProdMap)) {
+        if (parseInt(normalizeDateString(k).split('/')[0], 10) === dayNum) {
+          prod = p;
+          break;
+        }
+      }
+    }
+
+    return calculateDayOee(normDate, rec, prod, nominalCapability);
   });
 
   const workingDays = dailyResults.filter(d => d.isWorkingDay);
@@ -859,7 +950,7 @@ export function calculateMonthOee(
   const totalAdjustedCapability = workingDays.reduce((sum, d) => sum + d.adjustedCapability, 0);
 
   return {
-    totalCalendarDays: dates.length,
+    totalCalendarDays: normalizedDates.length,
     workingDaysCount: workingDays.length,
     stoppedDaysCount: stoppedDays.length,
     averageOee,

@@ -72,7 +72,8 @@ import {
   isCapabilityExclusionReason,
   calculateDayOee,
   calculateMonthOee,
-  INITIAL_DAILY_PRODUCTION 
+  INITIAL_DAILY_PRODUCTION,
+  normalizeDateString 
 } from '../types/machineHealth';
 import { 
   parseExcelDowntimeFile, 
@@ -481,38 +482,88 @@ export default function MachineHealthAnalytics() {
   const activeMachineCapability = machineCapabilities[selectedMachine] || 23000;
 
   // Active machine's daily production map (date => DailyProductionRecord)
-  const machineProductionMap = useMemo(() => {
+  const machineProductionMap: Record<string, DailyProductionRecord> = useMemo(() => {
     return dailyProductionData[selectedMachine] || {};
   }, [dailyProductionData, selectedMachine]);
 
   // Is viewing a single specific day?
   const isSingleDayView = selectedDayFilter !== 'all';
 
-  // Map of all downtime records by date for fast lookup
+  // Map of all downtime records by date for fast lookup (stores both raw date and normalized date)
   const downtimeMap = useMemo(() => {
     const map = new Map<string, DowntimeRecord>();
     machineRecords.forEach(r => {
-      if (r.date) map.set(r.date, r);
+      if (r.date) {
+        map.set(r.date, r);
+        const norm = normalizeDateString(r.date);
+        if (norm) map.set(norm, r);
+      }
     });
     return map;
   }, [machineRecords]);
 
-  // Distinct dates in the current month scope (combining downtime records and production logs)
+  // Helper to look up daily production for any date format (handles '1/9/2026' vs '01/09/2026')
+  const getProductionForDate = (dateStr: string): DailyProductionRecord => {
+    const norm = normalizeDateString(dateStr);
+    const { day } = parseRecordDate(dateStr);
+
+    if (machineProductionMap[dateStr]) return machineProductionMap[dateStr];
+    if (norm && machineProductionMap[norm]) return machineProductionMap[norm];
+
+    for (const [key, val] of Object.entries(machineProductionMap)) {
+      if (normalizeDateString(key) === norm || (day && parseRecordDate(key).day === day)) {
+        return val as DailyProductionRecord;
+      }
+    }
+
+    return {
+      production: 15582,
+      waste: 632,
+      customRunTimeMinutes: 1245,
+      isWorkingDay: true
+    };
+  };
+
+  // Helper to look up downtime record for any date format
+  const getDowntimeForDate = (dateStr: string): DowntimeRecord | undefined => {
+    const norm = normalizeDateString(dateStr);
+    const { day } = parseRecordDate(dateStr);
+
+    if (downtimeMap.has(dateStr)) return downtimeMap.get(dateStr);
+    if (norm && downtimeMap.has(norm)) return downtimeMap.get(norm);
+
+    for (const [key, rec] of downtimeMap.entries()) {
+      if (normalizeDateString(key) === norm || (day && parseRecordDate(key).day === day)) {
+        return rec;
+      }
+    }
+    return undefined;
+  };
+
+  // Distinct dates in the current month scope - strictly normalized and deduplicated!
   const currentMonthCalendarDates = useMemo(() => {
     const datesSet = new Set<string>();
     machineRecords.forEach(r => {
-      const { monthKey } = parseRecordDate(r.date);
+      const { monthKey, formattedDate } = parseRecordDate(r.date);
       if (selectedMonthFilter === 'all' || monthKey === selectedMonthFilter) {
-        if (r.date) datesSet.add(r.date);
+        const canonical = formattedDate || normalizeDateString(r.date);
+        if (canonical) datesSet.add(canonical);
       }
     });
     Object.keys(machineProductionMap).forEach(d => {
-      const { monthKey } = parseRecordDate(d);
+      const { monthKey, formattedDate } = parseRecordDate(d);
       if (selectedMonthFilter === 'all' || monthKey === selectedMonthFilter) {
-        datesSet.add(d);
+        const canonical = formattedDate || normalizeDateString(d);
+        if (canonical) datesSet.add(canonical);
       }
     });
-    return Array.from(datesSet).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+
+    // Sort numerically by day: Day 1, Day 2, Day 3 ... Day 30
+    return Array.from(datesSet).sort((a, b) => {
+      const dayA = parseInt(parseRecordDate(a).day, 10) || 0;
+      const dayB = parseInt(parseRecordDate(b).day, 10) || 0;
+      return dayA - dayB;
+    });
   }, [machineRecords, machineProductionMap, selectedMonthFilter]);
 
   // Month-level OEE summary (calculates average ONLY across operational working days!)
@@ -529,7 +580,6 @@ export default function MachineHealthAnalytics() {
   // Active single-day OEE result (when a specific day is selected)
   const singleDayOeeResult = useMemo(() => {
     if (!isSingleDayView) return null;
-    // Find target date matching selectedDayFilter
     const targetDate = dateScopedRecords[0]?.date || 
       (availableDays.find(d => d.key === selectedDayFilter)?.dateStr) || 
       currentMonthCalendarDates.find(d => {
@@ -537,10 +587,11 @@ export default function MachineHealthAnalytics() {
         return day === selectedDayFilter || d === selectedDayFilter;
       }) || selectedDayFilter;
 
-    const rec = downtimeMap.get(targetDate);
-    const prod = machineProductionMap[targetDate];
-    return calculateDayOee(targetDate, rec, prod, activeMachineCapability);
-  }, [isSingleDayView, dateScopedRecords, availableDays, selectedDayFilter, currentMonthCalendarDates, downtimeMap, machineProductionMap, activeMachineCapability]);
+    const normTargetDate = normalizeDateString(targetDate);
+    const rec = getDowntimeForDate(normTargetDate);
+    const prod = getProductionForDate(normTargetDate);
+    return calculateDayOee(normTargetDate, rec, prod, activeMachineCapability);
+  }, [isSingleDayView, dateScopedRecords, availableDays, selectedDayFilter, currentMonthCalendarDates, activeMachineCapability, downtimeMap, machineProductionMap]);
 
   // Active OEE values for display (switches between single day vs month average)
   const displayedOee = isSingleDayView
@@ -589,7 +640,7 @@ export default function MachineHealthAnalytics() {
 
   const displayedAdjCap = isSingleDayView
     ? (singleDayOeeResult?.adjustedCapability || activeMachineCapability)
-    : monthOeeSummary.totalAdjustedCapability;
+    : Math.round(monthOeeSummary.totalAdjustedCapability / Math.max(1, monthOeeSummary.workingDaysCount));
 
   const displayedExcludedReasonNames = isSingleDayView
     ? singleDayOeeResult?.excludedReasons.join(', ')
@@ -607,14 +658,10 @@ export default function MachineHealthAnalytics() {
 
   // Open OEE modal helper
   const handleOpenOeeConfig = (targetDate?: string) => {
-    const dateToUse = targetDate || (isSingleDayView ? (singleDayOeeResult?.date || '25/09/2026') : '25/09/2026');
+    const rawDate = targetDate || (isSingleDayView ? (singleDayOeeResult?.date || '25/09/2026') : '25/09/2026');
+    const dateToUse = normalizeDateString(rawDate);
     setOeeDraftDate(dateToUse);
-    const existing = machineProductionMap[dateToUse] || {
-      production: 15582,
-      waste: 632,
-      customRunTimeMinutes: 1245,
-      isWorkingDay: true
-    };
+    const existing = getProductionForDate(dateToUse);
     setOeeDraftProd(existing.production);
     setOeeDraftWaste(existing.waste);
     setOeeDraftRunTime(existing.customRunTimeMinutes ?? 1245);
@@ -624,13 +671,9 @@ export default function MachineHealthAnalytics() {
   };
 
   const handleOeeModalDateChange = (newDate: string) => {
-    setOeeDraftDate(newDate);
-    const existing = machineProductionMap[newDate] || {
-      production: 15582,
-      waste: 632,
-      customRunTimeMinutes: 1245,
-      isWorkingDay: true
-    };
+    const canonical = normalizeDateString(newDate);
+    setOeeDraftDate(canonical);
+    const existing = getProductionForDate(canonical);
     setOeeDraftProd(existing.production);
     setOeeDraftWaste(existing.waste);
     setOeeDraftRunTime(existing.customRunTimeMinutes ?? 1245);
@@ -638,7 +681,7 @@ export default function MachineHealthAnalytics() {
   };
 
   const handleAutoFillRunTime = () => {
-    const rec = downtimeMap.get(oeeDraftDate);
+    const rec = getDowntimeForDate(oeeDraftDate);
     const downtime = Number(rec?.totalDowntimeMinutes) || 0;
     setOeeDraftRunTime(Math.max(0, 1440 - downtime));
   };
@@ -649,9 +692,10 @@ export default function MachineHealthAnalytics() {
       [selectedMachine]: Number(oeeDraftCapability) || 23000
     }));
 
+    const canonicalDate = normalizeDateString(oeeDraftDate);
     setDailyProductionData(prev => {
       const machineData = { ...(prev[selectedMachine] || {}) };
-      machineData[oeeDraftDate] = {
+      machineData[canonicalDate] = {
         production: Number(oeeDraftProd) || 0,
         waste: Number(oeeDraftWaste) || 0,
         customRunTimeMinutes: Number(oeeDraftRunTime) || 0,
@@ -660,15 +704,16 @@ export default function MachineHealthAnalytics() {
       return { ...prev, [selectedMachine]: machineData };
     });
 
-    logAction('OEE Updated', `Updated capability (${oeeDraftCapability}) and production for ${selectedMachine} on ${oeeDraftDate}`, 'info');
+    logAction('OEE Updated', `Updated capability (${oeeDraftCapability}) and production for ${selectedMachine} on ${canonicalDate}`, 'info');
     setIsOeeConfigModalOpen(false);
   };
 
   const handleToggleDayWorking = (dateKey: string, currentVal: boolean) => {
+    const canonicalDate = normalizeDateString(dateKey);
     setDailyProductionData(prev => {
       const machineData = { ...(prev[selectedMachine] || {}) };
-      const current = machineData[dateKey] || { production: 15582, waste: 632, customRunTimeMinutes: 1245, isWorkingDay: true };
-      machineData[dateKey] = {
+      const current = getProductionForDate(canonicalDate);
+      machineData[canonicalDate] = {
         ...current,
         isWorkingDay: !currentVal,
         production: !currentVal ? (current.production || 15582) : 0,
