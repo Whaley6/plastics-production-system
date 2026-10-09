@@ -797,27 +797,39 @@ export function calculateDayOee(
 
   const plannedMinutes = Math.max(0, 1440 - excludedMins);
 
-  const goodProduction = isWorking ? (Number(productionEntry?.production) || 0) : 0;
+  // User formula variables:
+  // production = total production count (e.g. 15,582 pcs)
+  // waste = waste/scrap count (e.g. 632 pcs)
+  // goodProduction = production - waste (e.g. 14,950 pcs)
+  const production = isWorking ? (Number(productionEntry?.production) || 0) : 0;
   const waste = isWorking ? (Number(productionEntry?.waste) || 0) : 0;
-  const totalProduction = goodProduction + waste;
+  const goodProduction = Math.max(0, production - waste);
+  const totalProduction = production;
 
-  // Availability = Run Time / Planned Operating Time
+  // 1. Availability (A) = (run time / planned time) * 100
+  // e.g. 1,245 / 1,440 = 86.46% (or 1,245 / 1,320 = 94.32% if 2h مولدة excluded)
   const availability = plannedMinutes > 0 && isWorking
     ? Math.min(100, Math.max(0, (runTimeMinutes / plannedMinutes) * 100))
     : 0;
 
-  // Performance = Total Pieces Produced / Expected Output in Run Time
-  const expectedOutput = runTimeMinutes * (cap / 1440);
+  // 2. Performance (P) = (production / ((adjustedCapability / plannedMinutes) * runTime)) * 100
+  // Note: (adjustedCapability / plannedMinutes) represents machine capability in pcs/min
+  const expectedOutput = plannedMinutes > 0
+    ? (adjustedCapability / plannedMinutes) * runTimeMinutes
+    : (cap / 1440) * runTimeMinutes;
   const performance = expectedOutput > 0 && isWorking
-    ? Math.min(100, Math.max(0, (totalProduction / expectedOutput) * 100))
+    ? Math.min(100, Math.max(0, (production / expectedOutput) * 100))
     : 0;
 
-  // Quality = Good Production / Total Pieces Produced
-  const quality = totalProduction > 0 && isWorking
-    ? Math.min(100, Math.max(0, (goodProduction / totalProduction) * 100))
+  // 3. Quality (Q) = ((production - waste) / production) * 100
+  // e.g. (15,582 - 632) / 15,582 = 14,950 / 15,582 = 95.94%
+  const quality = production > 0 && isWorking
+    ? Math.min(100, Math.max(0, ((production - waste) / production) * 100))
     : (isWorking ? 100 : 0);
 
-  // Overall OEE = A * P * Q = (goodProduction / adjustedCapability) * 100
+  // 4. Overall OEE = A * P * Q = (goodProduction / adjustedCapability) * 100
+  // Formula: ((runTime / plannedMinutes) * (production / ((adjustedCapability / plannedMinutes) * runTime)) * ((production - waste) / production)) * 100
+  // This simplifies directly to ((production - waste) / adjustedCapability) * 100
   const oee = adjustedCapability > 0 && isWorking
     ? Math.min(100, Math.max(0, (goodProduction / adjustedCapability) * 100))
     : 0;
@@ -834,7 +846,7 @@ export function calculateDayOee(
     runTimeMinutes,
     plannedMinutes,
     goodProduction,
-    production: goodProduction,
+    production,
     waste,
     totalProduction,
     availability,

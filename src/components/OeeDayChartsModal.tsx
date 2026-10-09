@@ -56,11 +56,11 @@ export const OeeDayChartsModal: React.FC<OeeDayChartsModalProps> = ({
   const isStopped = !dayResult.isWorkingDay;
 
   // Safe numeric fallbacks to guarantee NO undefined / NaN errors
-  const goodProd = Number(dayResult.goodProduction ?? (dayResult as any).production ?? productionRecord?.production ?? 0);
+  const totalProd = Number(dayResult.production ?? productionRecord?.production ?? 0);
   const waste = Number(dayResult.waste ?? productionRecord?.waste ?? 0);
-  const totalOutput = goodProd + waste;
-  const goodPercent = totalOutput > 0 ? ((goodProd / totalOutput) * 100).toFixed(1) : '100';
-  const wastePercent = totalOutput > 0 ? ((waste / totalOutput) * 100).toFixed(1) : '0';
+  const goodProd = Number(dayResult.goodProduction ?? Math.max(0, totalProd - waste));
+  const goodPercent = totalProd > 0 ? ((goodProd / totalProd) * 100).toFixed(1) : '100';
+  const wastePercent = totalProd > 0 ? ((waste / totalProd) * 100).toFixed(1) : '0';
 
   const oeeScore = Number(dayResult.oee || 0);
   const availabilityScore = Number(dayResult.availability || 0);
@@ -89,6 +89,7 @@ export const OeeDayChartsModal: React.FC<OeeDayChartsModalProps> = ({
   const excludedMins = Math.min(totalMins - runMins, Number(dayResult.excludedDowntimeMinutes || 0));
   const standardDowntimeMins = Math.max(0, (Number(downtimeRecord?.totalDowntimeMinutes) || 0) - excludedMins);
   const unloggedMins = Math.max(0, totalMins - (runMins + excludedMins + standardDowntimeMins));
+  const expectedOutput = dayResult.plannedMinutes > 0 ? Math.round((adjCap / dayResult.plannedMinutes) * runMins) : 0;
 
   return (
     <div 
@@ -191,7 +192,7 @@ export const OeeDayChartsModal: React.FC<OeeDayChartsModalProps> = ({
                 </span>
               </div>
               <span className="text-[10px] text-tertiary font-mono">
-                Run: {dayResult.runTimeMinutes}m / {1440 - dayResult.excludedDowntimeMinutes}m
+                Run: {dayResult.runTimeMinutes}m / {dayResult.plannedMinutes}m
               </span>
             </div>
 
@@ -207,7 +208,7 @@ export const OeeDayChartsModal: React.FC<OeeDayChartsModalProps> = ({
                 </span>
               </div>
               <span className="text-[10px] text-tertiary font-mono">
-                Speed: {totalOutput.toLocaleString()} / target
+                Output: {totalProd.toLocaleString()} / {expectedOutput.toLocaleString()} target
               </span>
             </div>
 
@@ -223,8 +224,23 @@ export const OeeDayChartsModal: React.FC<OeeDayChartsModalProps> = ({
                 </span>
               </div>
               <span className="text-[10px] text-tertiary font-mono">
-                {goodProd.toLocaleString()} good / {waste.toLocaleString()} scrap
+                {goodProd.toLocaleString()} good / {waste.toLocaleString()} scrap ({goodPercent}%)
               </span>
+            </div>
+          </div>
+
+          {/* Exact OEE Formula Breakdown Banner */}
+          <div className="p-3 bg-surface-elevated/40 border border-divider/70 rounded-xl text-xs space-y-1 font-mono">
+            <div className="flex flex-wrap items-center justify-between text-secondary gap-2">
+              <span className="font-bold text-primary">Applied Formula:</span>
+              <span className="text-emerald-400 font-semibold">
+                OEE = A ({availabilityScore.toFixed(1)}%) × P ({performanceScore.toFixed(1)}%) × Q ({qualityScore.toFixed(1)}%) = {oeeScore.toFixed(1)}%
+              </span>
+            </div>
+            <div className="text-[11px] text-tertiary flex flex-wrap gap-x-4 gap-y-0.5">
+              <span>• <strong>A:</strong> ({runMins}m / {dayResult.plannedMinutes}m) = {availabilityScore.toFixed(1)}%</span>
+              <span>• <strong>P:</strong> ({totalProd.toLocaleString()} / {expectedOutput.toLocaleString()}) = {performanceScore.toFixed(1)}%</span>
+              <span>• <strong>Q:</strong> (({totalProd.toLocaleString()} - {waste.toLocaleString()}) / {totalProd.toLocaleString()}) = {qualityScore.toFixed(1)}%</span>
             </div>
           </div>
 

@@ -2724,17 +2724,17 @@ export default function MachineHealthAnalytics() {
 
                         {/* Good Prod */}
                         <td className="py-2 px-2 text-right font-bold text-emerald-400">
-                          {!isStopped ? prod.production.toLocaleString() : '-'}
+                          {!isStopped ? dayRes.goodProduction.toLocaleString() : '-'}
                         </td>
 
                         {/* Waste */}
                         <td className="py-2 px-2 text-right font-bold text-rose-400">
-                          {!isStopped ? prod.waste.toLocaleString() : '-'}
+                          {!isStopped ? dayRes.waste.toLocaleString() : '-'}
                         </td>
 
                         {/* Total Output */}
                         <td className="py-2 px-2 text-right text-secondary">
-                          {!isStopped ? (prod.production + prod.waste).toLocaleString() : '-'}
+                          {!isStopped ? dayRes.production.toLocaleString() : '-'}
                         </td>
 
                         {/* Run Time */}
