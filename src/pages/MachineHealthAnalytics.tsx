@@ -626,6 +626,10 @@ export default function MachineHealthAnalytics() {
     ? (singleDayOeeResult?.waste || 0)
     : monthOeeSummary.totalWaste;
 
+  const displayedTotalProd = isSingleDayView
+    ? (singleDayOeeResult?.production || (displayedGoodProd + displayedWaste))
+    : (monthOeeSummary.totalGoodProduction + monthOeeSummary.totalWaste);
+
   const displayedRunTime = isSingleDayView
     ? (singleDayOeeResult?.runTimeMinutes || 0)
     : monthOeeSummary.totalRunTimeMinutes;
@@ -2054,8 +2058,8 @@ export default function MachineHealthAnalytics() {
                 </div>
               </div>
 
-              {/* 4 Cards: OEE, Availability, Performance, Quality */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {/* 3 Cards: OEE, Production, Waste */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 {/* 1. Overall OEE Card */}
                 <div className="bg-canvas border border-divider rounded-xl p-3.5 flex flex-col justify-between shadow-xs relative overflow-hidden group hover:border-blue-500/40 transition-colors">
                   <div className="flex items-center justify-between mb-1">
@@ -2074,124 +2078,63 @@ export default function MachineHealthAnalytics() {
                     </div>
                   </div>
                   <div className="text-[10px] text-tertiary mt-1 flex justify-between items-center">
-                    <span>A × P × Q</span>
-                    <span className="font-mono font-medium text-secondary">Target: 80%+</span>
+                    <span>Target: 80%+</span>
+                    <span className="font-mono text-secondary">
+                      {isSingleDayView ? 'Daily Score' : `${monthOeeSummary.workingDaysCount} Days Avg`}
+                    </span>
                   </div>
                 </div>
 
-                {/* 2. Availability (A) Card */}
-                <div className="bg-canvas border border-divider rounded-xl p-3.5 flex flex-col justify-between shadow-xs relative overflow-hidden group hover:border-blue-500/40 transition-colors">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-[11px] font-bold text-tertiary uppercase tracking-wider">Availability (A)</span>
-                    <Clock className="w-3.5 h-3.5 text-sky-400" />
-                  </div>
-                  <div className="my-1">
-                    <div className="text-2xl font-black font-mono tracking-tight text-sky-400 tabular-nums">
-                      {displayedAvailability.toFixed(1)}%
-                    </div>
-                    <div className="w-full bg-surface-elevated h-1.5 rounded-full mt-2 overflow-hidden">
-                      <div 
-                        className="h-full bg-sky-500 rounded-full transition-all duration-500" 
-                        style={{ width: `${Math.min(100, Math.max(0, displayedAvailability))}%` }}
-                      />
-                    </div>
-                  </div>
-                  <div className="text-[10px] text-tertiary mt-1 flex justify-between items-center">
-                    <span className="font-mono">{displayedRunTime.toLocaleString()}m run</span>
-                    <span className="font-mono text-secondary">/ {displayedPlannedTime.toLocaleString()}m plan</span>
-                  </div>
-                </div>
-
-                {/* 3. Performance (P) Card */}
-                <div className="bg-canvas border border-divider rounded-xl p-3.5 flex flex-col justify-between shadow-xs relative overflow-hidden group hover:border-amber-500/40 transition-colors">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-[11px] font-bold text-tertiary uppercase tracking-wider">Performance (P)</span>
-                    <Zap className="w-3.5 h-3.5 text-amber-400" />
-                  </div>
-                  <div className="my-1">
-                    <div className="text-2xl font-black font-mono tracking-tight text-amber-400 tabular-nums">
-                      {displayedPerformance.toFixed(1)}%
-                    </div>
-                    <div className="w-full bg-surface-elevated h-1.5 rounded-full mt-2 overflow-hidden">
-                      <div 
-                        className="h-full bg-amber-500 rounded-full transition-all duration-500" 
-                        style={{ width: `${Math.min(100, Math.max(0, displayedPerformance))}%` }}
-                      />
-                    </div>
-                  </div>
-                  <div className="text-[10px] text-tertiary mt-1 flex justify-between items-center">
-                    <span className="font-mono">{(displayedGoodProd + displayedWaste).toLocaleString()} pcs</span>
-                    <span className="font-mono text-secondary">/ {displayedExpectedOutput.toLocaleString()} exp</span>
-                  </div>
-                </div>
-
-                {/* 4. Quality (Q) Card */}
+                {/* 2. Total Production Card */}
                 <div className="bg-canvas border border-divider rounded-xl p-3.5 flex flex-col justify-between shadow-xs relative overflow-hidden group hover:border-emerald-500/40 transition-colors">
                   <div className="flex items-center justify-between mb-1">
-                    <span className="text-[11px] font-bold text-tertiary uppercase tracking-wider">Quality (Q)</span>
-                    <Award className="w-3.5 h-3.5 text-emerald-400" />
+                    <span className="text-[11px] font-bold text-tertiary uppercase tracking-wider">Production</span>
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                   </div>
                   <div className="my-1">
                     <div className="text-2xl font-black font-mono tracking-tight text-emerald-400 tabular-nums">
-                      {displayedQuality.toFixed(1)}%
+                      {displayedTotalProd.toLocaleString()}
+                      <span className="text-xs font-normal text-tertiary ml-1.5">pcs</span>
                     </div>
                     <div className="w-full bg-surface-elevated h-1.5 rounded-full mt-2 overflow-hidden">
                       <div 
                         className="h-full bg-emerald-500 rounded-full transition-all duration-500" 
-                        style={{ width: `${Math.min(100, Math.max(0, displayedQuality))}%` }}
+                        style={{ width: `${displayedTotalProd > 0 ? Math.min(100, (displayedGoodProd / displayedTotalProd) * 100) : 100}%` }}
                       />
                     </div>
                   </div>
                   <div className="text-[10px] text-tertiary mt-1 flex justify-between items-center">
-                    <span className="font-mono text-emerald-400">{displayedGoodProd.toLocaleString()} good</span>
-                    <span className="font-mono text-rose-400">{displayedWaste.toLocaleString()} waste</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Machine Capability Adjustment Banner (User Rule Callout) */}
-              <div className="mt-3 p-3 bg-canvas/80 border border-divider rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
-                <div className="flex items-center gap-3">
-                  <div className="w-7 h-7 rounded-lg bg-purple-500/15 border border-purple-500/30 flex items-center justify-center text-purple-400 shrink-0">
-                    <Sliders className="w-3.5 h-3.5" />
-                  </div>
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-bold text-primary">Daily Machine Capability:</span>
-                      <span className="font-mono font-bold text-secondary">{activeMachineCapability.toLocaleString()} pcs/day</span>
-                      <span className="text-tertiary font-mono">({(activeMachineCapability / 24).toFixed(1)}/hr)</span>
-                      {displayedExcludedReduction > 0 && (
-                        <>
-                          <span className="text-tertiary">➜</span>
-                          <span className="text-rose-400 font-mono font-bold">-{displayedExcludedReduction.toLocaleString()} pcs</span>
-                          <span className="text-tertiary">➜</span>
-                          <span className="text-emerald-400 font-mono font-bold">Adjusted: {displayedAdjCap.toLocaleString()} pcs</span>
-                        </>
-                      )}
-                    </div>
-                    <div className="text-[11px] text-tertiary mt-0.5">
-                      {displayedExcludedMins > 0 ? (
-                        <span>
-                          <span className="text-amber-400 font-semibold">{displayedExcludedMins} min ({(displayedExcludedMins / 60).toFixed(1)} hrs)</span> excluded via reasons ({displayedExcludedReasonNames || 'مولدة, etc.'})
-                        </span>
-                      ) : (
-                        <span>No capability-reducing stop reasons recorded. Full capability retained.</span>
-                      )}
-                    </div>
+                    <span className="text-emerald-400 font-mono font-semibold">{displayedGoodProd.toLocaleString()} good pcs</span>
+                    <span className="font-mono text-secondary">
+                      {displayedTotalProd > 0 ? ((displayedGoodProd / displayedTotalProd) * 100).toFixed(1) : '100'}% yield
+                    </span>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
-                  <span className="text-[11px] px-2 py-0.5 rounded-md bg-surface border border-divider text-secondary font-mono">
-                    {isSingleDayView ? `Run: ${displayedRunTime}m` : `${monthOeeSummary.workingDaysCount} Days Active`}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => handleOpenOeeConfig()}
-                    className="text-xs text-blue-400 hover:text-blue-300 font-semibold cursor-pointer underline"
-                  >
-                    Edit
-                  </button>
+                {/* 3. Waste Card */}
+                <div className="bg-canvas border border-divider rounded-xl p-3.5 flex flex-col justify-between shadow-xs relative overflow-hidden group hover:border-rose-500/40 transition-colors">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[11px] font-bold text-tertiary uppercase tracking-wider">Waste</span>
+                    <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                  </div>
+                  <div className="my-1">
+                    <div className="text-2xl font-black font-mono tracking-tight text-rose-400 tabular-nums">
+                      {displayedWaste.toLocaleString()}
+                      <span className="text-xs font-normal text-tertiary ml-1.5">pcs</span>
+                    </div>
+                    <div className="w-full bg-surface-elevated h-1.5 rounded-full mt-2 overflow-hidden">
+                      <div 
+                        className="h-full bg-rose-500 rounded-full transition-all duration-500" 
+                        style={{ width: `${displayedTotalProd > 0 ? Math.min(100, (displayedWaste / displayedTotalProd) * 100) : 0}%` }}
+                      />
+                    </div>
+                  </div>
+                  <div className="text-[10px] text-tertiary mt-1 flex justify-between items-center">
+                    <span className="text-rose-400 font-mono font-semibold">
+                      {displayedTotalProd > 0 ? ((displayedWaste / displayedTotalProd) * 100).toFixed(1) : '0.0'}% waste rate
+                    </span>
+                    <span className="font-mono text-secondary">Scrap total</span>
+                  </div>
                 </div>
               </div>
 
