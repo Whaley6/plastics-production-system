@@ -672,7 +672,7 @@ export interface MonthOeeSummary {
 }
 
 /**
- * 11 Stop Reason Categories that exclude/reduce machine capability:
+ * Stop Reason Categories that exclude/reduce machine capability:
  * 1. "لا توجد طلبية"
  * 2. "مولدة"
  * 3. "بداية تشغيل"
@@ -681,9 +681,18 @@ export interface MonthOeeSummary {
  * 6. "لا توجد حبيبات"
  * 7. "لا يوجد امبول/فرز امبول"
  * 8. "UPS"
- * 9. "مكمبريسر" / "مكومبريسر"
- * 10. "Chiller"
- * 11. "اخرى"
+ * 9. "مكمبريسر" / "عدم توفر هواء"
+ * 10. "Chiller" / "عطل تبريد تشلر" / "عدم توفر ماء تبريد"
+ * 11. "انتظار الصيانة"
+ * 12. "تغيير سكرين"
+ * 13. "تنظيف ماكنة"
+ * 14. "تغيير قالب"
+ * 15. "تغيير لون"
+ * 16. "تجربة قالب"
+ * 17. "صيانة سنوية"
+ * 18. "عطل كهرباء خارجي"
+ * 19. "توقف خط تجميع"
+ * 20. "اخرى"
  */
 export const CAPABILITY_EXCLUDED_CATEGORIES = [
   'لا توجد طلبية',
@@ -696,6 +705,18 @@ export const CAPABILITY_EXCLUDED_CATEGORIES = [
   'UPS',
   'مكمبريسر',
   'Chiller',
+  'انتظار الصيانة',
+  'تغيير سكرين',
+  'تنظيف ماكنة',
+  'تغيير قالب',
+  'تغيير لون',
+  'تجربة قالب',
+  'صيانة سنوية',
+  'عطل كهرباء خارجي',
+  'عدم توفر هواء',
+  'عدم توفر ماء تبريد',
+  'عطل تبريد تشلر',
+  'توقف خط تجميع',
   'اخرى'
 ] as const;
 
@@ -711,8 +732,15 @@ export function isCapabilityExclusionReason(reasonOrType?: string): boolean {
   if (s.includes('لا توجد حبيبات') || s.includes('no_granules')) return true;
   if (s.includes('امبول') || s.includes('فرز امبول') || s.includes('no_preform')) return true;
   if (s.includes('ups')) return true;
-  if (s.includes('كمبريسر') || s.includes('كومبريسر') || s.includes('compressor')) return true;
-  if (s.includes('chiller') || s.includes('جلر') || s.includes('شلير')) return true;
+  if (s.includes('كمبريسر') || s.includes('كومبريسر') || s.includes('compressor') || s.includes('عدم توفر هواء') || s.includes('هواء')) return true;
+  if (s.includes('chiller') || s.includes('جلر') || s.includes('شلير') || s.includes('تبريد') || s.includes('ماء تبريد')) return true;
+  if (s.includes('انتظار الصيانة') || s.includes('صيانة سنوية')) return true;
+  if (s.includes('تغيير سكرين') || s.includes('سكرين')) return true;
+  if (s.includes('تنظيف ماكنة') || s.includes('تنظيف ماكينة')) return true;
+  if (s.includes('تغيير قالب') || s.includes('تجربة قالب')) return true;
+  if (s.includes('تغيير لون')) return true;
+  if (s.includes('كهرباء خارجي') || s.includes('عطل كهرباء')) return true;
+  if (s.includes('خط تجميع') || s.includes('تجميع')) return true;
   if (s.includes('اخرى') || s.includes('أخرى') || s.includes('other')) return true;
 
   return false;
@@ -1011,3 +1039,57 @@ export const INITIAL_DAILY_PRODUCTION: Record<string, Record<string, DailyProduc
   }
 };
 
+export const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
+];
+
+export function getOeeColor(val: number): string {
+  if (val >= 85) return '#10B981'; // World Class: Emerald green
+  if (val >= 70) return '#3B82F6'; // Good: Blue
+  if (val >= 60) return '#F59E0B'; // Fair: Amber
+  return '#F43F5E'; // Poor: Rose red
+}
+
+export function parseRecordDate(dateStr: string) {
+  if (!dateStr) return { raw: '', day: '', month: '', year: '', monthKey: '', monthDisplay: '', formattedDate: '' };
+  const raw = String(dateStr).trim();
+  const parts = raw.split(/[\/\-.]/);
+  let day = '';
+  let month = '';
+  let year = '';
+
+  if (parts.length >= 3) {
+    if (parts[0].length === 4) {
+      // YYYY-MM-DD
+      year = parts[0];
+      month = parts[1].padStart(2, '0');
+      day = parts[2].padStart(2, '0');
+    } else {
+      // DD/MM/YYYY
+      day = parts[0].padStart(2, '0');
+      month = parts[1].padStart(2, '0');
+      year = parts[2].length === 2 ? `20${parts[2]}` : parts[2];
+    }
+  } else if (parts.length === 2) {
+    // MM/YYYY or YYYY-MM
+    if (parts[0].length === 4) {
+      year = parts[0];
+      month = parts[1].padStart(2, '0');
+    } else {
+      month = parts[0].padStart(2, '0');
+      year = parts[1].length === 2 ? `20${parts[1]}` : parts[1];
+    }
+  } else if (/^day\s*\d+/i.test(raw)) {
+    const num = raw.replace(/\D/g, '');
+    day = num.padStart(2, '0');
+  }
+
+  const monthKey = month && year ? `${year}-${month}` : (month || '');
+  const monthIdx = parseInt(month, 10) - 1;
+  const monthName = monthIdx >= 0 && monthIdx < 12 ? MONTH_NAMES[monthIdx] : '';
+  const monthDisplay = monthName && year ? `${monthName} ${year}` : (month && year ? `${month}/${year}` : (monthName || raw));
+  const formattedDate = day && month && year ? `${day}/${month}/${year}` : raw;
+
+  return { raw, day, month, year, monthKey, monthDisplay, formattedDate };
+}

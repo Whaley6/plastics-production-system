@@ -43,6 +43,9 @@ import {
   Area, 
   BarChart, 
   Bar, 
+  LineChart,
+  Line,
+  ReferenceLine,
   XAxis, 
   YAxis, 
   CartesianGrid, 
@@ -52,6 +55,8 @@ import {
   Pie, 
   Cell 
 } from 'recharts';
+import { OeeDataPasteModal } from '../components/OeeDataPasteModal';
+import { OeeDayChartsModal } from '../components/OeeDayChartsModal';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { useAuth } from '../hooks/useAuth';
 import { defaultRoles } from './Roles';
@@ -174,7 +179,10 @@ export default function MachineHealthAnalytics() {
   const [selectedMonthFilter, setSelectedMonthFilter] = useState<string>('all');
   const [selectedDayFilter, setSelectedDayFilter] = useState<string>('all');
   const [showLegendPanel, setShowLegendPanel] = useState<boolean>(true);
-  const [viewMode, setViewMode] = useState<'spreadsheet' | 'analytics'>('spreadsheet');
+  const [viewMode, setViewMode] = useState<'spreadsheet' | 'analytics' | 'oee'>('spreadsheet');
+  const [isOeePasteModalOpen, setIsOeePasteModalOpen] = useState<boolean>(false);
+  const [selectedDayChartResult, setSelectedDayChartResult] = useState<DayOeeResult | null>(null);
+  const [oeeTrendChartType, setOeeTrendChartType] = useState<'oee' | 'output' | 'factors'>('oee');
 
   // Daily Pop-up Tab state (when uploading the daily excel with NO.MK and REASON)
   const [isDailyReviewOpen, setIsDailyReviewOpen] = useState<boolean>(false);
@@ -741,6 +749,38 @@ export default function MachineHealthAnalytics() {
     logAction('OEE Reset', `Reset ${selectedMachine} production benchmark to 26 working days & 4 stopped days`, 'info');
   };
 
+  // Handler to open Day Visual Chart Breakdown
+  const handleOpenDayChart = (dateStr: string) => {
+    const canonical = normalizeDateString(dateStr);
+    const rec = getDowntimeForDate(canonical);
+    const prod = getProductionForDate(canonical);
+    const result = calculateDayOee(canonical, rec, prod, activeMachineCapability);
+    setSelectedDayChartResult(result);
+  };
+
+  // Memoized Chart data for Monthly OEE Trend & Output Comparison
+  const oeeTrendChartData = useMemo(() => {
+    return monthOeeSummary.dailyResults.map(r => {
+      const { day } = parseRecordDate(r.date);
+      const isStopped = !r.isWorkingDay;
+      return {
+        date: r.date,
+        dayNum: day ? parseInt(day, 10) : 0,
+        dayLabel: day ? `D${parseInt(day, 10)}` : r.date,
+        oee: isStopped ? 0 : Number(r.oee.toFixed(1)),
+        availability: isStopped ? 0 : Number(r.availability.toFixed(1)),
+        performance: isStopped ? 0 : Number(r.performance.toFixed(1)),
+        quality: isStopped ? 0 : Number(r.quality.toFixed(1)),
+        production: isStopped ? 0 : r.production,
+        waste: isStopped ? 0 : r.waste,
+        adjustedCapability: r.adjustedCapability,
+        nominalCapability: activeMachineCapability,
+        isWorkingDay: r.isWorkingDay,
+        runTime: r.runTimeMinutes
+      };
+    });
+  }, [monthOeeSummary, activeMachineCapability]);
+
   // Handle live typing in the "Combined Reasons with +" box
   const handleCombinedReasonsChange = (val: string) => {
     setDraftCombinedReasons(val);
@@ -1193,7 +1233,7 @@ export default function MachineHealthAnalytics() {
           <button
             type="button"
             onClick={() => setViewMode('spreadsheet')}
-            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer ${
               viewMode === 'spreadsheet' ? 'bg-surface-elevated text-primary font-bold shadow-xs' : 'text-tertiary hover:text-secondary'
             }`}
           >
@@ -1202,11 +1242,21 @@ export default function MachineHealthAnalytics() {
           <button
             type="button"
             onClick={() => setViewMode('analytics')}
-            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer ${
               viewMode === 'analytics' ? 'bg-surface-elevated text-primary font-bold shadow-xs' : 'text-tertiary hover:text-secondary'
             }`}
           >
             Charts & Trends
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('oee')}
+            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors flex items-center gap-1.5 cursor-pointer ${
+              viewMode === 'oee' ? 'bg-blue-600 text-white font-bold shadow-xs' : 'text-tertiary hover:text-secondary'
+            }`}
+          >
+            <Gauge className="w-3.5 h-3.5" />
+            <span>OEE & Production Ledger</span>
           </button>
         </div>
       </div>
@@ -2166,7 +2216,10 @@ export default function MachineHealthAnalytics() {
                         <button
                           key={dayRes.date}
                           type="button"
-                          onClick={() => setSelectedDayFilter(day || dayRes.date)}
+                          onClick={() => {
+                            setSelectedDayFilter(day || dayRes.date);
+                            handleOpenDayChart(dayRes.date);
+                          }}
                           title={`${dayRes.date}: ${isStopped ? 'STOPPED (Excluded from average)' : `OEE: ${dayRes.oee.toFixed(1)}%`}`}
                           className={`flex flex-col items-center justify-center p-1 rounded-md border text-[10px] transition-all cursor-pointer ${
                             isStopped
@@ -2298,6 +2351,475 @@ export default function MachineHealthAnalytics() {
         </div>
       </div>
     )}
+
+      {/* OEE & DAILY PRODUCTION LEDGER VIEW */}
+      {viewMode === 'oee' && (
+        <div className="flex flex-col gap-5">
+          {/* Header Action & Status Bar */}
+          <div className="bg-surface border border-divider rounded-xl p-4 shadow-xs flex flex-wrap justify-between items-center gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/30 flex items-center justify-center text-blue-400">
+                <Gauge className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-base font-bold text-primary">
+                    OEE & Daily Production Ledger — {selectedMachine}
+                  </h2>
+                  <span className="text-xs px-2.5 py-0.5 rounded-full bg-surface-elevated border border-divider text-secondary font-mono">
+                    {selectedMonthFilter === 'all' ? 'September 2026' : selectedMonthFilter}
+                  </span>
+                </div>
+                <p className="text-xs text-tertiary">
+                  Manage daily good production, scrap waste, operating runtime, and machine capability deductions.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2.5">
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium">
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>Auto-Saved in Browser & Database</span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsOeePasteModalOpen(true)}
+                className="flex items-center gap-2 px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold shadow-xs transition-colors cursor-pointer"
+              >
+                <ClipboardPaste className="w-4 h-4" />
+                <span>Paste / Import Data (لصق واستيراد)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleOpenOeeConfig()}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-surface hover:bg-surface-elevated border border-divider text-secondary hover:text-primary rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+              >
+                <Sliders className="w-3.5 h-3.5 text-purple-400" />
+                <span>Cap: {activeMachineCapability.toLocaleString()} pcs</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleResetOeeToBenchmark}
+                className="px-3 py-1.5 bg-surface hover:bg-surface-elevated border border-divider text-tertiary hover:text-amber-400 rounded-lg text-xs font-medium transition-colors cursor-pointer"
+                title="Reset to 26 working days & 4 stopped days benchmark"
+              >
+                Reset Default
+              </button>
+            </div>
+          </div>
+
+          {/* KPI Summary Cards Grid (5 Cards) */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+            {/* 1. Month Average OEE */}
+            <div className="p-4 rounded-xl bg-surface border border-divider flex flex-col justify-between shadow-xs">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-tertiary flex items-center justify-between">
+                <span>Month OEE Avg</span>
+                <Activity className="w-3.5 h-3.5" style={{ color: getOeeColor(monthOeeSummary.averageOee) }} />
+              </span>
+              <div className="my-2">
+                <span className="text-3xl font-black font-mono tracking-tight" style={{ color: getOeeColor(monthOeeSummary.averageOee) }}>
+                  {monthOeeSummary.averageOee.toFixed(1)}%
+                </span>
+              </div>
+              <span className="text-[10px] text-tertiary font-mono">
+                Across {monthOeeSummary.workingDaysCount} working days (stops excluded)
+              </span>
+            </div>
+
+            {/* 2. Total Good Production */}
+            <div className="p-4 rounded-xl bg-surface border border-divider flex flex-col justify-between shadow-xs">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-tertiary flex items-center justify-between">
+                <span>Total Good Output</span>
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+              </span>
+              <div className="my-2">
+                <span className="text-2xl font-black font-mono tracking-tight text-emerald-400">
+                  {monthOeeSummary.totalGoodProduction.toLocaleString()}
+                </span>
+                <span className="text-xs text-tertiary font-normal ml-1">pcs</span>
+              </div>
+              <span className="text-[10px] text-tertiary font-mono">
+                Delivered quality output
+              </span>
+            </div>
+
+            {/* 3. Total Waste / Scrap */}
+            <div className="p-4 rounded-xl bg-surface border border-divider flex flex-col justify-between shadow-xs">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-tertiary flex items-center justify-between">
+                <span>Total Scrap Waste</span>
+                <Award className="w-3.5 h-3.5 text-rose-400" />
+              </span>
+              <div className="my-2">
+                <span className="text-2xl font-black font-mono tracking-tight text-rose-400">
+                  {monthOeeSummary.totalWaste.toLocaleString()}
+                </span>
+                <span className="text-xs text-tertiary font-normal ml-1">pcs</span>
+              </div>
+              <span className="text-[10px] text-tertiary font-mono">
+                Quality: {monthOeeSummary.totalGoodProduction + monthOeeSummary.totalWaste > 0 ? ((monthOeeSummary.totalGoodProduction / (monthOeeSummary.totalGoodProduction + monthOeeSummary.totalWaste)) * 100).toFixed(1) : 100}%
+              </span>
+            </div>
+
+            {/* 4. Active vs Stopped Days */}
+            <div className="p-4 rounded-xl bg-surface border border-divider flex flex-col justify-between shadow-xs">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-tertiary flex items-center justify-between">
+                <span>Days Breakdown</span>
+                <Calendar className="w-3.5 h-3.5 text-blue-400" />
+              </span>
+              <div className="my-2 flex items-baseline gap-1.5">
+                <span className="text-2xl font-black font-mono tracking-tight text-emerald-400">
+                  {monthOeeSummary.workingDaysCount}
+                </span>
+                <span className="text-xs text-tertiary">active /</span>
+                <span className="text-xl font-bold font-mono text-rose-400">
+                  {monthOeeSummary.stoppedDaysCount}
+                </span>
+                <span className="text-xs text-tertiary">stopped</span>
+              </div>
+              <span className="text-[10px] text-tertiary font-mono">
+                {currentMonthCalendarDates.length} days total in month
+              </span>
+            </div>
+
+            {/* 5. Daily Capability & Adjusted */}
+            <div className="p-4 rounded-xl bg-surface border border-divider flex flex-col justify-between shadow-xs">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-tertiary flex items-center justify-between">
+                <span>Daily Capability</span>
+                <Sliders className="w-3.5 h-3.5 text-purple-400" />
+              </span>
+              <div className="my-2">
+                <span className="text-2xl font-black font-mono tracking-tight text-primary">
+                  {activeMachineCapability.toLocaleString()}
+                </span>
+                <span className="text-xs text-tertiary font-normal ml-1">pcs/day</span>
+              </div>
+              <span className="text-[10px] text-emerald-400 font-mono">
+                Adj Daily Avg: {displayedAdjCap.toLocaleString()} pcs
+              </span>
+            </div>
+          </div>
+
+          {/* Interactive Monthly Trend Chart Card */}
+          <div className="p-5 bg-surface border border-divider rounded-xl shadow-xs space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-divider pb-3">
+              <div className="flex items-center gap-2">
+                <TrendingUp className="w-4 h-4 text-blue-400" />
+                <h3 className="font-bold text-sm text-primary">
+                  Monthly Performance & OEE Trends ({selectedMachine})
+                </h3>
+              </div>
+
+              {/* Chart Switcher Buttons */}
+              <div className="flex items-center gap-1 p-0.5 bg-canvas border border-divider rounded-lg text-xs">
+                <button
+                  type="button"
+                  onClick={() => setOeeTrendChartType('oee')}
+                  className={`px-3 py-1 rounded-md font-medium transition-colors cursor-pointer ${
+                    oeeTrendChartType === 'oee' ? 'bg-blue-600 text-white font-bold' : 'text-tertiary hover:text-secondary'
+                  }`}
+                >
+                  OEE % Trend
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOeeTrendChartType('output')}
+                  className={`px-3 py-1 rounded-md font-medium transition-colors cursor-pointer ${
+                    oeeTrendChartType === 'output' ? 'bg-blue-600 text-white font-bold' : 'text-tertiary hover:text-secondary'
+                  }`}
+                >
+                  Output vs Capability (pcs)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOeeTrendChartType('factors')}
+                  className={`px-3 py-1 rounded-md font-medium transition-colors cursor-pointer ${
+                    oeeTrendChartType === 'factors' ? 'bg-blue-600 text-white font-bold' : 'text-tertiary hover:text-secondary'
+                  }`}
+                >
+                  Three Factors (A, P, Q)
+                </button>
+              </div>
+            </div>
+
+            {/* Recharts Container */}
+            <div className="h-64 w-full pt-1">
+              <ResponsiveContainer width="100%" height="100%">
+                {oeeTrendChartType === 'oee' ? (
+                  <BarChart 
+                    data={oeeTrendChartData} 
+                    margin={{ top: 10, right: 10, left: -10, bottom: 0 }}
+                    onClick={(entry: any) => {
+                      if (entry && entry.activePayload && entry.activePayload[0]) {
+                        handleOpenDayChart(entry.activePayload[0].payload.date);
+                      }
+                    }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+                    <XAxis dataKey="dayLabel" stroke="#71717a" fontSize={11} tickLine={false} />
+                    <YAxis stroke="#71717a" fontSize={11} domain={[0, 100]} tickFormatter={v => `${v}%`} />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#18181b', borderColor: '#3f3f46', borderRadius: '0.5rem', fontSize: '11px' }}
+                      formatter={(val: any, name: any, item: any) => {
+                        const rec = item.payload;
+                        if (!rec.isWorkingDay) return ['Stopped Day (Excluded from average)', 'Status'];
+                        return [`${val}%`, 'Daily OEE'];
+                      }}
+                    />
+                    <ReferenceLine y={85} stroke="#10b981" strokeDasharray="3 3" label={{ value: '85% World Class', fill: '#10b981', fontSize: 10, position: 'top' }} />
+                    <Bar dataKey="oee" radius={[4, 4, 0, 0]} cursor="pointer">
+                      {oeeTrendChartData.map((entry, index) => (
+                        <Cell 
+                          key={`cell-${index}`} 
+                          fill={!entry.isWorkingDay ? '#3f3f46' : getOeeColor(entry.oee)} 
+                        />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                ) : oeeTrendChartType === 'output' ? (
+                  <BarChart 
+                    data={oeeTrendChartData} 
+                    margin={{ top: 10, right: 10, left: 10, bottom: 0 }}
+                    onClick={(entry: any) => {
+                      if (entry && entry.activePayload && entry.activePayload[0]) {
+                        handleOpenDayChart(entry.activePayload[0].payload.date);
+                      }
+                    }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+                    <XAxis dataKey="dayLabel" stroke="#71717a" fontSize={11} tickLine={false} />
+                    <YAxis stroke="#71717a" fontSize={11} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#18181b', borderColor: '#3f3f46', borderRadius: '0.5rem', fontSize: '11px' }}
+                      formatter={(val: any, name: string) => [
+                        `${Number(val).toLocaleString()} pcs`, 
+                        name === 'production' ? 'Good Output' : 'Adjusted Capability'
+                      ]}
+                    />
+                    <Bar dataKey="adjustedCapability" name="Adjusted Cap" fill="#6366f1" radius={[4, 4, 0, 0]} cursor="pointer" opacity={0.5} />
+                    <Bar dataKey="production" name="Good Output" fill="#10b981" radius={[4, 4, 0, 0]} cursor="pointer" />
+                  </BarChart>
+                ) : (
+                  <LineChart 
+                    data={oeeTrendChartData} 
+                    margin={{ top: 10, right: 10, left: -10, bottom: 0 }}
+                    onClick={(entry: any) => {
+                      if (entry && entry.activePayload && entry.activePayload[0]) {
+                        handleOpenDayChart(entry.activePayload[0].payload.date);
+                      }
+                    }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+                    <XAxis dataKey="dayLabel" stroke="#71717a" fontSize={11} tickLine={false} />
+                    <YAxis stroke="#71717a" fontSize={11} domain={[0, 100]} tickFormatter={v => `${v}%`} />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#18181b', borderColor: '#3f3f46', borderRadius: '0.5rem', fontSize: '11px' }}
+                      formatter={(val: any) => [`${val}%`]}
+                    />
+                    <Line type="monotone" dataKey="availability" name="Availability" stroke="#38bdf8" strokeWidth={2} dot={{ r: 2 }} cursor="pointer" />
+                    <Line type="monotone" dataKey="performance" name="Performance" stroke="#f59e0b" strokeWidth={2} dot={{ r: 2 }} cursor="pointer" />
+                    <Line type="monotone" dataKey="quality" name="Quality" stroke="#10b981" strokeWidth={2} dot={{ r: 2 }} cursor="pointer" />
+                  </LineChart>
+                )}
+              </ResponsiveContainer>
+            </div>
+
+            <div className="pt-2 border-t border-divider/60 flex items-center justify-between text-xs text-tertiary">
+              <span className="flex items-center gap-1.5 text-blue-400">
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Click on any bar or point in the chart to view that day&apos;s complete visual charts &amp; breakdown.</span>
+              </span>
+              <span className="font-mono text-[11px]">
+                {oeeTrendChartData.filter(d => d.isWorkingDay).length} Working Days Active
+              </span>
+            </div>
+          </div>
+
+          {/* Full Interactive 30-Day Ledger Table */}
+          <div className="bg-surface border border-divider rounded-xl shadow-xs overflow-hidden flex flex-col">
+            <div className="px-5 py-3.5 border-b border-divider flex flex-wrap justify-between items-center gap-3 bg-surface-elevated/20">
+              <div>
+                <h3 className="text-sm font-bold text-primary flex items-center gap-2">
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+                  <span>30-Day Production & OEE Ledger ({selectedMachine})</span>
+                </h3>
+                <p className="text-xs text-tertiary">
+                  Click any row to open its visual breakdown chart. Toggle status between Active and Stopped with one click.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsOeePasteModalOpen(true)}
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                >
+                  <ClipboardPaste className="w-3.5 h-3.5" />
+                  <span>Paste Data</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs font-mono">
+                <thead className="bg-surface-elevated/60 text-[11px] text-tertiary border-b border-divider font-semibold">
+                  <tr>
+                    <th className="py-2.5 px-3">Day / Date</th>
+                    <th className="py-2.5 px-2 text-center">Status</th>
+                    <th className="py-2.5 px-2 text-right">Good Prod</th>
+                    <th className="py-2.5 px-2 text-right">Waste</th>
+                    <th className="py-2.5 px-2 text-right">Total</th>
+                    <th className="py-2.5 px-2 text-right">Run (min)</th>
+                    <th className="py-2.5 px-2 text-right">Downtime & Exclusions</th>
+                    <th className="py-2.5 px-2 text-right">Adjusted Cap</th>
+                    <th className="py-2.5 px-2 text-right">A %</th>
+                    <th className="py-2.5 px-2 text-right">P %</th>
+                    <th className="py-2.5 px-2 text-right">Q %</th>
+                    <th className="py-2.5 px-3 text-right">OEE %</th>
+                    <th className="py-2.5 px-3 text-center">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-divider/50">
+                  {currentMonthCalendarDates.map(d => {
+                    const canonical = normalizeDateString(d);
+                    const prod = getProductionForDate(canonical);
+                    const rec = getDowntimeForDate(canonical);
+                    const dayRes = calculateDayOee(canonical, rec, prod, activeMachineCapability);
+                    const { day } = parseRecordDate(canonical);
+                    const isStopped = !prod.isWorkingDay;
+
+                    return (
+                      <tr 
+                        key={d}
+                        onClick={() => handleOpenDayChart(canonical)}
+                        className={`hover:bg-surface-elevated/40 transition-colors cursor-pointer ${
+                          isStopped ? 'opacity-60 bg-surface-elevated/10' : ''
+                        }`}
+                      >
+                        {/* Day & Date */}
+                        <td className="py-2.5 px-3 font-medium text-primary">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-bold text-xs">Day {day ? parseInt(day, 10) : ''}</span>
+                            <span className="text-[11px] text-tertiary">({canonical})</span>
+                          </div>
+                        </td>
+
+                        {/* Status Toggle Button */}
+                        <td className="py-2 px-2 text-center" onClick={e => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            onClick={() => handleToggleDayWorking(canonical, !isStopped)}
+                            className={`px-2 py-0.5 rounded-md text-[10px] font-bold border transition-all cursor-pointer ${
+                              !isStopped
+                                ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25'
+                                : 'bg-rose-500/15 border-rose-500/30 text-rose-400 hover:bg-rose-500/25'
+                            }`}
+                            title="Click to toggle status (Working vs Stopped)"
+                          >
+                            {!isStopped ? '🟢 Active' : '⏸️ Stopped'}
+                          </button>
+                        </td>
+
+                        {/* Good Prod */}
+                        <td className="py-2 px-2 text-right font-bold text-emerald-400">
+                          {!isStopped ? prod.production.toLocaleString() : '-'}
+                        </td>
+
+                        {/* Waste */}
+                        <td className="py-2 px-2 text-right font-bold text-rose-400">
+                          {!isStopped ? prod.waste.toLocaleString() : '-'}
+                        </td>
+
+                        {/* Total Output */}
+                        <td className="py-2 px-2 text-right text-secondary">
+                          {!isStopped ? (prod.production + prod.waste).toLocaleString() : '-'}
+                        </td>
+
+                        {/* Run Time */}
+                        <td className="py-2 px-2 text-right text-sky-400 font-bold">
+                          {!isStopped ? `${prod.customRunTimeMinutes ?? 1245}m` : '0m'}
+                        </td>
+
+                        {/* Downtime & Exclusions */}
+                        <td className="py-2 px-2 text-right text-[11px]">
+                          {dayRes.excludedDowntimeMinutes > 0 ? (
+                            <span className="text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded text-[10px]">
+                              {dayRes.excludedReasons[0] || 'مولدة'}: {dayRes.excludedDowntimeMinutes}m (-{dayRes.capabilityReduction.toLocaleString()})
+                            </span>
+                          ) : rec && rec.totalDowntimeMinutes > 0 ? (
+                            <span className="text-tertiary">
+                              {rec.totalDowntimeMinutes}m
+                            </span>
+                          ) : (
+                            <span className="text-tertiary">-</span>
+                          )}
+                        </td>
+
+                        {/* Adjusted Cap */}
+                        <td className="py-2 px-2 text-right text-primary font-bold">
+                          {dayRes.adjustedCapability.toLocaleString()}
+                        </td>
+
+                        {/* A % */}
+                        <td className="py-2 px-2 text-right text-sky-400">
+                          {!isStopped ? `${dayRes.availability.toFixed(1)}%` : '-'}
+                        </td>
+
+                        {/* P % */}
+                        <td className="py-2 px-2 text-right text-amber-400">
+                          {!isStopped ? `${dayRes.performance.toFixed(1)}%` : '-'}
+                        </td>
+
+                        {/* Q % */}
+                        <td className="py-2 px-2 text-right text-emerald-400">
+                          {!isStopped ? `${dayRes.quality.toFixed(1)}%` : '-'}
+                        </td>
+
+                        {/* OEE % */}
+                        <td className="py-2 px-3 text-right">
+                          <span 
+                            className="px-2 py-0.5 rounded font-bold text-xs inline-block"
+                            style={{ 
+                              backgroundColor: !isStopped ? `${getOeeColor(dayRes.oee)}15` : 'transparent',
+                              color: !isStopped ? getOeeColor(dayRes.oee) : '#71717a'
+                            }}
+                          >
+                            {!isStopped ? `${dayRes.oee.toFixed(1)}%` : 'Excluded'}
+                          </span>
+                        </td>
+
+                        {/* Actions */}
+                        <td className="py-2 px-3 text-center" onClick={e => e.stopPropagation()}>
+                          <div className="flex items-center justify-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenDayChart(canonical)}
+                              className="p-1 hover:bg-surface-elevated rounded text-blue-400 hover:text-blue-300 transition-colors cursor-pointer"
+                              title="View visual charts for this day"
+                            >
+                              <Activity className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenOeeConfig(canonical)}
+                              className="p-1 hover:bg-surface-elevated rounded text-tertiary hover:text-primary transition-colors cursor-pointer"
+                              title="Edit day production & downtime values"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* POP-UP TAB: DAILY IMPORT & MULTI-REASON TIME/TYPE ASSIGNMENT */}
       {isDailyReviewOpen && dailyImportData && (
@@ -3271,6 +3793,47 @@ export default function MachineHealthAnalytics() {
           </div>
         </div>
       )}
+
+      {/* SMART OEE DATA PASTE MODAL */}
+      <OeeDataPasteModal
+        isOpen={isOeePasteModalOpen}
+        onClose={() => setIsOeePasteModalOpen(false)}
+        machineName={selectedMachine}
+        nominalCapability={activeMachineCapability}
+        availableDates={currentMonthCalendarDates}
+        onSaveData={({ productionUpdates, capabilityUpdate }) => {
+          if (capabilityUpdate) {
+            setMachineCapabilities(prev => ({
+              ...prev,
+              [selectedMachine]: capabilityUpdate
+            }));
+          }
+          setDailyProductionData(prev => {
+            const next: Record<string, Record<string, DailyProductionRecord>> = { ...prev };
+            const machineData: Record<string, DailyProductionRecord> = { ...(next[selectedMachine] || {}) };
+            for (const key of Object.keys(productionUpdates)) {
+              machineData[normalizeDateString(key)] = productionUpdates[key];
+            }
+            next[selectedMachine] = machineData;
+            return next;
+          });
+          logAction('OEE Pasted', `Pasted & updated OEE data for ${selectedMachine}`, 'info');
+        }}
+      />
+
+      {/* DAY VISUAL CHARTS & BREAKDOWN MODAL */}
+      <OeeDayChartsModal
+        isOpen={!!selectedDayChartResult}
+        onClose={() => setSelectedDayChartResult(null)}
+        dayResult={selectedDayChartResult}
+        downtimeRecord={selectedDayChartResult ? getDowntimeForDate(selectedDayChartResult.date) : undefined}
+        productionRecord={selectedDayChartResult ? getProductionForDate(selectedDayChartResult.date) : undefined}
+        nominalCapability={activeMachineCapability}
+        onEditDay={(targetDate) => {
+          setSelectedDayChartResult(null);
+          handleOpenOeeConfig(targetDate);
+        }}
+      />
     </div>
   );
 }
