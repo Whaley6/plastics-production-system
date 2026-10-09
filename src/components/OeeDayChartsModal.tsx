@@ -52,37 +52,53 @@ export const OeeDayChartsModal: React.FC<OeeDayChartsModalProps> = ({
 }) => {
   if (!isOpen || !dayResult) return null;
 
-  const { day, monthDisplay } = parseRecordDate(dayResult.date);
+  const { day } = parseRecordDate(dayResult.date || '');
   const isStopped = !dayResult.isWorkingDay;
 
-  const totalOutput = dayResult.production + dayResult.waste;
-  const goodPercent = totalOutput > 0 ? ((dayResult.production / totalOutput) * 100).toFixed(1) : '100';
-  const wastePercent = totalOutput > 0 ? ((dayResult.waste / totalOutput) * 100).toFixed(1) : '0';
+  // Safe numeric fallbacks to guarantee NO undefined / NaN errors
+  const goodProd = Number(dayResult.goodProduction ?? (dayResult as any).production ?? productionRecord?.production ?? 0);
+  const waste = Number(dayResult.waste ?? productionRecord?.waste ?? 0);
+  const totalOutput = goodProd + waste;
+  const goodPercent = totalOutput > 0 ? ((goodProd / totalOutput) * 100).toFixed(1) : '100';
+  const wastePercent = totalOutput > 0 ? ((waste / totalOutput) * 100).toFixed(1) : '0';
+
+  const oeeScore = Number(dayResult.oee || 0);
+  const availabilityScore = Number(dayResult.availability || 0);
+  const performanceScore = Number(dayResult.performance || 0);
+  const qualityScore = Number(dayResult.quality || 0);
+  const adjCap = Number(dayResult.adjustedCapability || nominalCapability || 23000);
+  const excludedReasonsList = Array.isArray(dayResult.excludedReasons) ? dayResult.excludedReasons : [];
 
   // Pie chart data for Quality Output
   const qualityPieData = [
-    { name: 'Good Production', value: Math.max(0, dayResult.production), color: '#10B981' },
-    { name: 'Waste / Scrap', value: Math.max(0, dayResult.waste), color: '#F43F5E' }
+    { name: 'Good Production', value: Math.max(0, goodProd), color: '#10B981' },
+    { name: 'Waste / Scrap', value: Math.max(0, waste), color: '#F43F5E' }
   ];
 
   // Bar chart data for Capability vs Actual Production
   const capabilityBarData = [
-    { name: 'Nominal Cap', pcs: nominalCapability, fill: '#6366F1' },
-    { name: 'Adjusted Cap', pcs: dayResult.adjustedCapability, fill: '#3B82F6' },
-    { name: 'Good Output', pcs: dayResult.production, fill: '#10B981' },
-    { name: 'Waste', pcs: dayResult.waste, fill: '#F43F5E' }
+    { name: 'Nominal Cap', pcs: nominalCapability || 23000, fill: '#6366F1' },
+    { name: 'Adjusted Cap', pcs: adjCap, fill: '#3B82F6' },
+    { name: 'Good Output', pcs: goodProd, fill: '#10B981' },
+    { name: 'Waste', pcs: waste, fill: '#F43F5E' }
   ];
 
   // 24-Hour Time Distribution calculation (1440 min total)
   const totalMins = 1440;
-  const runMins = Math.min(totalMins, dayResult.runTimeMinutes);
-  const excludedMins = Math.min(totalMins - runMins, dayResult.excludedDowntimeMinutes);
-  const standardDowntimeMins = Math.max(0, (downtimeRecord?.totalDowntimeMinutes || 0) - excludedMins);
+  const runMins = Math.min(totalMins, Number(dayResult.runTimeMinutes || 0));
+  const excludedMins = Math.min(totalMins - runMins, Number(dayResult.excludedDowntimeMinutes || 0));
+  const standardDowntimeMins = Math.max(0, (Number(downtimeRecord?.totalDowntimeMinutes) || 0) - excludedMins);
   const unloggedMins = Math.max(0, totalMins - (runMins + excludedMins + standardDowntimeMins));
 
   return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-xs z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-      <div className="bg-canvas border border-divider rounded-2xl shadow-2xl max-w-4xl w-full flex flex-col max-h-[92vh] overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+    <div 
+      className="fixed inset-0 bg-black/80 backdrop-blur-xs z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto"
+      onClick={onClose}
+    >
+      <div 
+        className="bg-canvas border border-divider rounded-2xl shadow-2xl max-w-4xl w-full flex flex-col max-h-[92vh] overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+        onClick={e => e.stopPropagation()}
+      >
         
         {/* Modal Header */}
         <div className="px-6 py-4 border-b border-divider flex justify-between items-center bg-surface/70 shrink-0">
@@ -90,10 +106,10 @@ export const OeeDayChartsModal: React.FC<OeeDayChartsModalProps> = ({
             <div 
               className="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-sm shadow-sm"
               style={{ 
-                backgroundColor: `${getOeeColor(dayResult.oee)}20`, 
-                borderColor: `${getOeeColor(dayResult.oee)}40`,
+                backgroundColor: `${getOeeColor(oeeScore)}20`, 
+                borderColor: `${getOeeColor(oeeScore)}40`,
                 borderWidth: '1px',
-                color: getOeeColor(dayResult.oee)
+                color: getOeeColor(oeeScore)
               }}
             >
               <Activity className="w-5 h-5" />
@@ -151,15 +167,15 @@ export const OeeDayChartsModal: React.FC<OeeDayChartsModalProps> = ({
             <div className="p-4 rounded-xl bg-surface border border-divider flex flex-col justify-between">
               <span className="text-[11px] font-bold uppercase tracking-wider text-tertiary flex items-center justify-between">
                 <span>Overall OEE</span>
-                <Activity className="w-3.5 h-3.5" style={{ color: getOeeColor(dayResult.oee) }} />
+                <Activity className="w-3.5 h-3.5" style={{ color: getOeeColor(oeeScore) }} />
               </span>
               <div className="my-2">
-                <span className="text-3xl font-black font-mono tracking-tight" style={{ color: getOeeColor(dayResult.oee) }}>
-                  {isStopped ? '0.0%' : `${dayResult.oee.toFixed(1)}%`}
+                <span className="text-3xl font-black font-mono tracking-tight" style={{ color: getOeeColor(oeeScore) }}>
+                  {isStopped ? '0.0%' : `${oeeScore.toFixed(1)}%`}
                 </span>
               </div>
               <span className="text-[10px] text-tertiary font-mono">
-                {dayResult.oee >= 85 ? 'World Class (≥85%)' : dayResult.oee >= 65 ? 'Typical / Fair' : 'Needs Optimization'}
+                {oeeScore >= 85 ? 'World Class (≥85%)' : oeeScore >= 65 ? 'Typical / Fair' : 'Needs Optimization'}
               </span>
             </div>
 
@@ -171,7 +187,7 @@ export const OeeDayChartsModal: React.FC<OeeDayChartsModalProps> = ({
               </span>
               <div className="my-2">
                 <span className="text-2xl font-black font-mono tracking-tight text-sky-400">
-                  {dayResult.availability.toFixed(1)}%
+                  {availabilityScore.toFixed(1)}%
                 </span>
               </div>
               <span className="text-[10px] text-tertiary font-mono">
@@ -187,7 +203,7 @@ export const OeeDayChartsModal: React.FC<OeeDayChartsModalProps> = ({
               </span>
               <div className="my-2">
                 <span className="text-2xl font-black font-mono tracking-tight text-amber-400">
-                  {dayResult.performance.toFixed(1)}%
+                  {performanceScore.toFixed(1)}%
                 </span>
               </div>
               <span className="text-[10px] text-tertiary font-mono">
@@ -203,11 +219,11 @@ export const OeeDayChartsModal: React.FC<OeeDayChartsModalProps> = ({
               </span>
               <div className="my-2">
                 <span className="text-2xl font-black font-mono tracking-tight text-emerald-400">
-                  {dayResult.quality.toFixed(1)}%
+                  {qualityScore.toFixed(1)}%
                 </span>
               </div>
               <span className="text-[10px] text-tertiary font-mono">
-                {dayResult.production.toLocaleString()} good / {dayResult.waste} scrap
+                {goodProd.toLocaleString()} good / {waste.toLocaleString()} scrap
               </span>
             </div>
           </div>
@@ -221,20 +237,20 @@ export const OeeDayChartsModal: React.FC<OeeDayChartsModalProps> = ({
               <div>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-bold text-primary">Daily Machine Capability:</span>
-                  <span className="font-mono text-secondary font-bold">{nominalCapability.toLocaleString()} pcs</span>
-                  {dayResult.capabilityReduction > 0 && (
+                  <span className="font-mono text-secondary font-bold">{(nominalCapability || 23000).toLocaleString()} pcs</span>
+                  {Number(dayResult.capabilityReduction) > 0 && (
                     <>
                       <span className="text-tertiary">➜</span>
-                      <span className="font-mono text-rose-400 font-bold">-{dayResult.capabilityReduction.toLocaleString()} pcs</span>
+                      <span className="font-mono text-rose-400 font-bold">-{Number(dayResult.capabilityReduction).toLocaleString()} pcs</span>
                       <span className="text-tertiary">➜</span>
-                      <span className="font-mono text-emerald-400 font-bold">Adjusted: {dayResult.adjustedCapability.toLocaleString()} pcs</span>
+                      <span className="font-mono text-emerald-400 font-bold">Adjusted: {adjCap.toLocaleString()} pcs</span>
                     </>
                   )}
                 </div>
                 <div className="text-[11px] text-tertiary mt-0.5">
-                  {dayResult.excludedDowntimeMinutes > 0 ? (
+                  {Number(dayResult.excludedDowntimeMinutes) > 0 ? (
                     <span>
-                      <strong className="text-amber-400">{dayResult.excludedDowntimeMinutes} min ({(dayResult.excludedDowntimeMinutes / 60).toFixed(1)} hrs)</strong> excluded from capability via reasons: <span className="text-blue-300 font-medium">{dayResult.excludedReasons.join(', ') || 'مولدة'}</span>
+                      <strong className="text-amber-400">{dayResult.excludedDowntimeMinutes} min ({(dayResult.excludedDowntimeMinutes / 60).toFixed(1)} hrs)</strong> excluded from capability via reasons: <span className="text-blue-300 font-medium">{excludedReasonsList.join(', ') || 'مولدة'}</span>
                     </span>
                   ) : (
                     <span>No capability-reducing stop reasons recorded on this day. Full capability retained.</span>
@@ -276,7 +292,7 @@ export const OeeDayChartsModal: React.FC<OeeDayChartsModalProps> = ({
                     </Pie>
                     <Tooltip 
                       contentStyle={{ backgroundColor: '#18181b', borderColor: '#3f3f46', borderRadius: '0.5rem', fontSize: '11px' }}
-                      formatter={(val: any) => [`${val.toLocaleString()} pcs`, 'Quantity']}
+                      formatter={(val: any) => [`${Number(val).toLocaleString()} pcs`, 'Quantity']}
                     />
                   </PieChart>
                 </ResponsiveContainer>
@@ -291,12 +307,12 @@ export const OeeDayChartsModal: React.FC<OeeDayChartsModalProps> = ({
                 <div className="flex items-center gap-1.5">
                   <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
                   <span className="text-tertiary">Good:</span>
-                  <strong className="text-emerald-400">{dayResult.production.toLocaleString()} ({goodPercent}%)</strong>
+                  <strong className="text-emerald-400">{goodProd.toLocaleString()} ({goodPercent}%)</strong>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
                   <span className="text-tertiary">Waste:</span>
-                  <strong className="text-rose-400">{dayResult.waste.toLocaleString()} ({wastePercent}%)</strong>
+                  <strong className="text-rose-400">{waste.toLocaleString()} ({wastePercent}%)</strong>
                 </div>
               </div>
             </div>
@@ -318,7 +334,7 @@ export const OeeDayChartsModal: React.FC<OeeDayChartsModalProps> = ({
                     <YAxis stroke="#71717a" fontSize={10} tickFormatter={val => `${(val / 1000).toFixed(0)}k`} />
                     <Tooltip 
                       contentStyle={{ backgroundColor: '#18181b', borderColor: '#3f3f46', borderRadius: '0.5rem', fontSize: '11px' }}
-                      formatter={(val: any) => [`${val.toLocaleString()} pcs`, 'Quantity']}
+                      formatter={(val: any) => [`${Number(val).toLocaleString()} pcs`, 'Quantity']}
                     />
                     <Bar dataKey="pcs" radius={[4, 4, 0, 0]}>
                       {capabilityBarData.map((entry, index) => (
@@ -332,8 +348,8 @@ export const OeeDayChartsModal: React.FC<OeeDayChartsModalProps> = ({
               <div className="pt-2 border-t border-divider/60 text-[11px] text-tertiary flex justify-between items-center font-mono">
                 <span>Output Rate vs Target:</span>
                 <span className="text-primary font-bold">
-                  {dayResult.adjustedCapability > 0 
-                    ? `${((dayResult.production / dayResult.adjustedCapability) * 100).toFixed(1)}% Target Realized` 
+                  {adjCap > 0 
+                    ? `${((goodProd / adjCap) * 100).toFixed(1)}% Target Realized` 
                     : 'N/A'}
                 </span>
               </div>
@@ -401,7 +417,7 @@ export const OeeDayChartsModal: React.FC<OeeDayChartsModalProps> = ({
               {excludedMins > 0 && (
                 <span className="flex items-center gap-1.5 text-purple-300">
                   <span className="w-2 h-2 rounded-full bg-purple-500" />
-                  <span>Capability Excluded: <strong>{dayResult.excludedDowntimeMinutes}m</strong></span>
+                  <span>Capability Excluded: <strong>{excludedMins}m</strong></span>
                 </span>
               )}
               {standardDowntimeMins > 0 && (
@@ -414,7 +430,7 @@ export const OeeDayChartsModal: React.FC<OeeDayChartsModalProps> = ({
           </div>
 
           {/* Stoppages for this Day (if any logged) */}
-          {downtimeRecord && downtimeRecord.reasons && downtimeRecord.reasons.length > 0 && (
+          {downtimeRecord && Array.isArray(downtimeRecord.reasons) && downtimeRecord.reasons.length > 0 && (
             <div className="p-4 bg-surface border border-divider rounded-xl space-y-2.5">
               <span className="text-xs font-bold text-primary flex items-center gap-1.5">
                 <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
@@ -423,7 +439,8 @@ export const OeeDayChartsModal: React.FC<OeeDayChartsModalProps> = ({
 
               <div className="divide-y divide-divider/50 border border-divider rounded-lg overflow-hidden text-xs">
                 {downtimeRecord.reasons.map((sub, idx) => {
-                  const isExcluded = dayResult.excludedReasons.some(r => r.includes(sub.reason) || (sub.type && r.includes(sub.type)));
+                  const subReasonText = sub?.reason || sub?.type || '';
+                  const isExcluded = excludedReasonsList.some(r => r && (subReasonText.includes(r) || r.includes(subReasonText)));
 
                   return (
                     <div key={idx} className="p-2.5 flex items-center justify-between hover:bg-surface-elevated/40 transition-colors">

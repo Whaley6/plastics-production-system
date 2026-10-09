@@ -645,6 +645,7 @@ export interface DayOeeResult {
   runTimeMinutes: number;
   plannedMinutes: number;
   goodProduction: number;
+  production: number; // Convenient alias for goodProduction
   waste: number;
   totalProduction: number;
   availability: number; // 0..100
@@ -833,6 +834,7 @@ export function calculateDayOee(
     runTimeMinutes,
     plannedMinutes,
     goodProduction,
+    production: goodProduction,
     waste,
     totalProduction,
     availability,
