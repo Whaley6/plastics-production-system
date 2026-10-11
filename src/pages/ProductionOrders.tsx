@@ -42,7 +42,16 @@ import {
   Layers,
   TrendingUp,
   AlertTriangle,
-  LayoutGrid
+  LayoutGrid,
+  Columns3,
+  Filter,
+  Cpu,
+  Tag,
+  ChevronUp,
+  ChevronDown,
+  ChevronRight,
+  Wrench,
+  RefreshCw
 } from 'lucide-react';
 
 export type ProductionOrder = {
@@ -862,7 +871,9 @@ export default function ProductionOrders() {
   const [orders, setOrders] = useLocalStorage<ProductionOrder[]>('production_orders_v11', INITIAL_PRODUCTION_ORDERS);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
-  const [viewMode, setViewMode] = useState<'Spreadsheet' | 'ActiveList' | 'History'>('Spreadsheet');
+  const [viewMode, setViewMode] = useState<'Spreadsheet' | 'Board' | 'ActiveList' | 'History'>('Spreadsheet');
+  const [machineCategoryFilter, setMachineCategoryFilter] = useState<'all' | 'injection' | 'blow' | 'label'>('all');
+  const [machineStatusFilter, setMachineStatusFilter] = useState<'all' | 'running' | 'idle' | 'maintenance'>('all');
   const [extraQueueColumns, setExtraQueueColumns] = useState<number>(0);
   
   const [isCreatingOrder, setIsCreatingOrder] = useState(false);
@@ -2151,6 +2162,380 @@ export default function ProductionOrders() {
     };
   }, [machines, orders]);
 
+  const getMachineCategory = (mach: ProductionMachine): 'injection' | 'blow' | 'label' => {
+    if (mach.type) return mach.type;
+    const nameUpper = mach.name.toUpperCase();
+    if (nameUpper.includes('BLOW') || mach.m.toUpperCase().startsWith('B')) return 'blow';
+    if (nameUpper.includes('LABEL') || mach.m.toUpperCase().startsWith('L')) return 'label';
+    return 'injection';
+  };
+
+  const getMachineStatus = (mach: ProductionMachine): 'running' | 'maintenance' | 'idle' => {
+    const sequence = getMachineSequence(mach.name);
+    const active = sequence.length > 0 ? sequence[0] : null;
+    if (!active) return 'idle';
+    if (active.status === 'In Progress') return 'running';
+    if (active.status === 'Maintenance') return 'maintenance';
+    return 'idle';
+  };
+
+  const categoryCounts = React.useMemo(() => {
+    let injection = 0;
+    let blow = 0;
+    let label = 0;
+    machines.forEach(m => {
+      const cat = getMachineCategory(m);
+      if (cat === 'injection') injection++;
+      else if (cat === 'blow') blow++;
+      else if (cat === 'label') label++;
+    });
+    return { all: machines.length, injection, blow, label };
+  }, [machines]);
+
+  const statusCounts = React.useMemo(() => {
+    let running = 0;
+    let idle = 0;
+    let maintenance = 0;
+    machines.forEach(m => {
+      const st = getMachineStatus(m);
+      if (st === 'running') running++;
+      else if (st === 'maintenance') maintenance++;
+      else idle++;
+    });
+    return { all: machines.length, running, idle, maintenance };
+  }, [machines, orders]);
+
+  const getFilteredMachines = () => {
+    const sorted = getSortedMachines();
+    return sorted.filter(mach => {
+      if (machineCategoryFilter !== 'all') {
+        const cat = getMachineCategory(mach);
+        if (cat !== machineCategoryFilter) return false;
+      }
+      if (machineStatusFilter !== 'all') {
+        const st = getMachineStatus(mach);
+        if (st !== machineStatusFilter) return false;
+      }
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const sequence = getMachineSequence(mach.name);
+        const machMatch = mach.name.toLowerCase().includes(q) || 
+                          mach.m.toLowerCase().includes(q) || 
+                          (mach.moldName && mach.moldName.toLowerCase().includes(q));
+        const orderMatch = sequence.some(o => 
+          o.itemName.toLowerCase().includes(q) || 
+          o.id.toLowerCase().includes(q) ||
+          (o.granulesType && o.granulesType.toLowerCase().includes(q))
+        );
+        if (!machMatch && !orderMatch) return false;
+      }
+      return true;
+    });
+  };
+
+  const renderMachineCard = (mach: ProductionMachine) => {
+    const sequence = getMachineSequence(mach.name);
+    const activeOrder = sequence.length > 0 ? sequence[0] : null;
+    const isRunning = activeOrder?.status === 'In Progress';
+    const isPaused = activeOrder?.status === 'Maintenance';
+    const queuedOrders = (activeOrder && (isRunning || isPaused)) ? sequence.slice(1) : sequence;
+    const cat = getMachineCategory(mach);
+
+    const produced = activeOrder ? getProducedCount(activeOrder) : 0;
+    const target = activeOrder?.quantity || 0;
+    const pct = (!activeOrder?.isContinuous && target > 0) ? Math.min(100, Math.round((produced / target) * 100)) : 0;
+
+    return (
+      <div 
+        key={mach.id}
+        className={`bg-surface border rounded-2xl flex flex-col overflow-hidden transition-all duration-200 shadow-xs hover:shadow-md ${
+          isRunning 
+            ? 'border-emerald-500/40 shadow-emerald-500/5' 
+            : isPaused 
+            ? 'border-rose-500/40 shadow-rose-500/5' 
+            : 'border-divider/70 hover:border-divider'
+        }`}
+      >
+        {/* Machine Card Header */}
+        <div className="p-3.5 border-b border-divider/60 bg-surface-elevated/30 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5">
+            <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-xs tracking-tight shrink-0 shadow-xs ${
+              cat === 'injection' 
+                ? 'bg-purple-500/15 text-purple-300 border border-purple-500/30' 
+                : cat === 'blow' 
+                ? 'bg-blue-500/15 text-blue-300 border border-blue-500/30' 
+                : 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
+            }`}>
+              {mach.m}
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-sm text-primary">{mach.name}</span>
+                <span className="text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.2 rounded-md bg-surface-elevated text-tertiary border border-divider-subtle">
+                  {cat === 'injection' ? 'INJ' : cat === 'blow' ? 'BLOW' : 'LABEL'}
+                </span>
+              </div>
+              <div className="text-[11px] text-tertiary flex items-center gap-1.5 mt-0.5">
+                <span className="font-mono">{mach.currentAmps || 32}A</span>
+                <span>•</span>
+                <span>{mach.rateMethod === 'hourly' ? `${mach.hourlyRate?.toLocaleString() || 2400} bph` : `${mach.cycleTime || 12}s (${mach.cavities || 1} cav)`}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Status Pill */}
+          <div className="flex items-center gap-1.5">
+            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border ${
+              isRunning 
+                ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' 
+                : isPaused 
+                ? 'bg-rose-500/15 text-rose-400 border-rose-500/30' 
+                : 'bg-surface-elevated text-tertiary border-divider'
+            }`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${
+                isRunning ? 'bg-emerald-400 animate-pulse' : isPaused ? 'bg-rose-400' : 'bg-slate-400'
+              }`} />
+              <span>{isRunning ? 'Running' : isPaused ? 'Paused' : 'Idle'}</span>
+            </span>
+          </div>
+        </div>
+
+        {/* Installed Mold Bar */}
+        <div 
+          onClick={() => {
+            setViewingMoldDetails({
+              machId: mach.id,
+              machName: mach.name,
+              machType: mach.type,
+              moldName: mach.moldName || 'Default Mold',
+              activeOrderId: activeOrder?.id || null,
+              activeOrderName: activeOrder?.itemName || null,
+              rateMethod: mach.rateMethod || (cat === 'injection' ? 'cycle' : 'hourly'),
+              cycleTime: mach.cycleTime || 12,
+              cavities: mach.cavities || 1,
+              hourlyRate: mach.hourlyRate || (cat === 'blow' ? 2400 : cat === 'label' ? 3500 : 1000),
+              currentAmps: mach.currentAmps || 32
+            });
+          }}
+          className="px-3.5 py-2 bg-indigo-500/5 hover:bg-indigo-500/10 border-b border-divider/60 flex items-center justify-between text-xs cursor-pointer transition-colors group"
+          title="Click to view & edit installed mold specifications"
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            <Settings className="w-3.5 h-3.5 text-indigo-400 group-hover:rotate-45 transition-transform shrink-0" />
+            <span className="text-indigo-300 font-bold truncate">
+              <bdi dir="rtl">{mach.moldName || 'No Mold Installed'}</bdi>
+            </span>
+          </div>
+          <span className="text-[10px] text-tertiary group-hover:text-secondary flex items-center gap-1 shrink-0 font-medium">
+            <span>Specs</span>
+            <ChevronRight className="w-3 h-3" />
+          </span>
+        </div>
+
+        {/* Active Production Body */}
+        <div className="p-3.5 flex-1 flex flex-col gap-3">
+          {activeOrder && (isRunning || isPaused) ? (
+            <div className={`p-3 rounded-xl border flex flex-col gap-2.5 ${
+              isRunning ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-rose-500/5 border-rose-500/20'
+            }`}>
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-surface border border-divider text-tertiary">
+                      {activeOrder.id}
+                    </span>
+                    <span className="text-[10px] font-bold uppercase text-purple-400">
+                      Active Job
+                    </span>
+                  </div>
+                  <h4 
+                    onClick={() => setViewingOrder(activeOrder)}
+                    className="font-bold text-sm text-primary hover:text-purple-400 cursor-pointer line-clamp-1 transition-colors"
+                  >
+                    <bdi dir="rtl">{activeOrder.itemName}</bdi>
+                  </h4>
+                  <p className="text-[11px] text-tertiary mt-0.5 line-clamp-1">
+                    <bdi dir="rtl">{activeOrder.granulesType} {activeOrder.colorant ? `• ${activeOrder.colorant}` : ''}</bdi>
+                  </p>
+                </div>
+
+                {/* Progress Mini Meter */}
+                <div className="text-right shrink-0">
+                  {activeOrder.isContinuous ? (
+                    <span className="inline-flex items-center gap-1 text-xs font-bold text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded-lg border border-purple-500/20">
+                      <Infinity className="w-3.5 h-3.5" /> Run
+                    </span>
+                  ) : (
+                    <span className="text-xs font-bold font-mono text-emerald-400">
+                      {pct}%
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Progress Bar & Quantity Counter */}
+              <div>
+                <div className="flex justify-between text-[11px] font-medium text-secondary mb-1">
+                  <span>Produced: <strong className="text-primary font-mono">{produced.toLocaleString()}</strong></span>
+                  <span>Target: <strong className="text-primary font-mono">{activeOrder.isContinuous ? '∞' : target.toLocaleString()}</strong></span>
+                </div>
+                <div className="h-1.5 w-full bg-surface-elevated rounded-full overflow-hidden border border-divider-subtle">
+                  {activeOrder.isContinuous ? (
+                    <div className="h-full w-full bg-gradient-to-r from-purple-500/30 via-purple-400 to-purple-500/30" />
+                  ) : (
+                    <div 
+                      className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-full transition-all duration-300"
+                      style={{ width: `${Math.max(2, pct)}%` }}
+                    />
+                  )}
+                </div>
+              </div>
+
+              {/* Quick Controller Actions */}
+              <div className="flex items-center justify-between gap-1.5 pt-1.5 border-t border-divider/40">
+                <button
+                  type="button"
+                  onClick={() => setViewingOrder(activeOrder)}
+                  className="px-2.5 py-1 text-[11px] font-semibold text-secondary hover:text-primary bg-surface hover:bg-surface-elevated border border-divider rounded-lg transition cursor-pointer"
+                >
+                  Diagnostic HUD
+                </button>
+
+                <div className="flex items-center gap-1">
+                  {isRunning ? (
+                    <button
+                      type="button"
+                      onClick={(e) => handlePauseOrder(activeOrder.id, e)}
+                      className="p-1.5 text-amber-400 hover:bg-amber-500/15 rounded-lg transition cursor-pointer"
+                      title="Pause Order"
+                    >
+                      <PauseCircle className="w-4 h-4" />
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={(e) => handleResumeOrder(activeOrder.id, e)}
+                      className="p-1.5 text-emerald-400 hover:bg-emerald-500/15 rounded-lg transition cursor-pointer"
+                      title="Resume Order"
+                    >
+                      <PlayCircle className="w-4 h-4" />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={(e) => handleCompleteOrder(activeOrder.id, e)}
+                    className="p-1.5 text-emerald-400 hover:bg-emerald-500/15 rounded-lg transition cursor-pointer"
+                    title="Complete Order"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* Standby Card */
+            <div className="p-4 rounded-xl border border-dashed border-divider bg-surface-elevated/20 text-center flex flex-col items-center justify-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-slate-400"></span>
+              <p className="text-xs font-semibold text-secondary">Line on Standby</p>
+              <p className="text-[11px] text-tertiary">No active job currently on floor</p>
+              {!isViewer && (
+                <button
+                  type="button"
+                  onClick={() => openOrderModal(null, mach.name)}
+                  className="mt-1 px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 shadow-xs"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Dispatch Job</span>
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Queued Sequence Section */}
+          <div className="mt-auto pt-2 border-t border-divider/50">
+            <div className="flex items-center justify-between text-[11px] font-semibold text-tertiary uppercase tracking-wider mb-2">
+              <span className="flex items-center gap-1">
+                <Layers className="w-3 h-3 text-purple-400" />
+                Queue Stack ({queuedOrders.length})
+              </span>
+              {!isViewer && (
+                <button
+                  type="button"
+                  onClick={() => handleAddDirectQueueOrder(mach.name)}
+                  className="text-purple-400 hover:text-purple-300 font-bold flex items-center gap-0.5 normal-case text-xs cursor-pointer"
+                >
+                  <Plus className="w-3 h-3" /> Add Run
+                </button>
+              )}
+            </div>
+
+            {queuedOrders.length === 0 ? (
+              <div className="py-2.5 text-center text-[11px] text-tertiary border border-dashed border-divider/60 rounded-lg">
+                Queue empty
+              </div>
+            ) : (
+              <div className="space-y-1.5 max-h-[140px] overflow-y-auto pr-0.5">
+                {queuedOrders.slice(0, 3).map((qOrder, idx) => (
+                  <div
+                    key={qOrder.id}
+                    className="p-2 bg-surface-elevated/40 hover:bg-surface-elevated/80 border border-divider/60 rounded-xl flex items-center justify-between gap-2 text-xs transition-colors group"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="w-5 h-5 rounded-md bg-purple-500/15 text-purple-300 font-mono text-[10px] font-bold flex items-center justify-center shrink-0">
+                        #{idx + 1}
+                      </span>
+                      <div className="min-w-0">
+                        <p 
+                          onClick={() => setViewingOrder(qOrder)}
+                          className="font-semibold text-secondary hover:text-purple-400 cursor-pointer truncate"
+                        >
+                          <bdi dir="rtl">{qOrder.itemName}</bdi>
+                        </p>
+                        <p className="text-[10px] text-tertiary font-mono">
+                          {qOrder.quantity.toLocaleString()} {getOrderUnit(qOrder)}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Sequence swap arrows */}
+                    {!isViewer && (
+                      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          type="button"
+                          disabled={idx === 0}
+                          onClick={() => changeQueueSequence(qOrder.id, 'left')}
+                          className="p-1 hover:bg-surface rounded text-tertiary hover:text-primary disabled:opacity-30 cursor-pointer"
+                          title="Move Up"
+                        >
+                          <ChevronUp className="w-3 h-3" />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={idx === queuedOrders.length - 1}
+                          onClick={() => changeQueueSequence(qOrder.id, 'right')}
+                          className="p-1 hover:bg-surface rounded text-tertiary hover:text-primary disabled:opacity-30 cursor-pointer"
+                          title="Move Down"
+                        >
+                          <ChevronDown className="w-3 h-3" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+
+                {queuedOrders.length > 3 && (
+                  <p className="text-[10px] text-center text-tertiary pt-1">
+                    +{queuedOrders.length - 3} more queued runs...
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="w-full h-full flex flex-col gap-5 text-primary">
       {/* Top Hero Banner */}
@@ -2278,7 +2663,7 @@ export default function ProductionOrders() {
         {/* Navigation & Toolbar Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 border-b border-divider/60 bg-surface-elevated/20 shrink-0">
           {/* Segmented Capsule Tabs */}
-          <div className="flex items-center p-1 bg-canvas/80 border border-divider/80 rounded-xl">
+          <div className="flex flex-wrap items-center p-1 bg-canvas/80 border border-divider/80 rounded-xl gap-0.5">
             <button type="button" 
               onClick={() => setViewMode('Spreadsheet')}
               className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
@@ -2289,6 +2674,22 @@ export default function ProductionOrders() {
             >
               <LayoutGrid className="w-3.5 h-3.5" />
               <span>Queue Matrix</span>
+            </button>
+            <button type="button" 
+              onClick={() => setViewMode('Board')}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                viewMode === 'Board'
+                  ? 'bg-purple-600 text-white shadow-xs shadow-purple-600/30'
+                  : 'text-tertiary hover:text-primary hover:bg-surface-elevated/50'
+              }`}
+            >
+              <Columns3 className="w-3.5 h-3.5" />
+              <span>Machine Cockpit</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                viewMode === 'Board' ? 'bg-white/20 text-white' : 'bg-surface-elevated text-tertiary'
+              }`}>
+                {machines.length}
+              </span>
             </button>
             <button type="button" 
               onClick={() => setViewMode('ActiveList')}
@@ -2337,7 +2738,7 @@ export default function ProductionOrders() {
               />
             </div>
             
-            {viewMode !== 'Spreadsheet' && (
+            {(viewMode === 'ActiveList' || viewMode === 'History') && (
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
@@ -2361,9 +2762,119 @@ export default function ProductionOrders() {
           </div>
         </div>
 
+        {/* Machine Category & Status Filter Bar for Matrix & Board modes */}
+        {(viewMode === 'Spreadsheet' || viewMode === 'Board') && (
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2 bg-surface-elevated/10 border-b border-divider/60 text-xs shrink-0">
+            {/* Category Pills */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] font-semibold text-tertiary uppercase tracking-wider mr-1 flex items-center gap-1">
+                <Filter className="w-3 h-3 text-purple-400" /> Lines:
+              </span>
+              <button
+                type="button"
+                onClick={() => setMachineCategoryFilter('all')}
+                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                  machineCategoryFilter === 'all'
+                    ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30 font-bold'
+                    : 'text-tertiary hover:text-primary hover:bg-surface-elevated/50'
+                }`}
+              >
+                All Lines ({categoryCounts.all})
+              </button>
+              <button
+                type="button"
+                onClick={() => setMachineCategoryFilter('injection')}
+                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  machineCategoryFilter === 'injection'
+                    ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30 font-bold'
+                    : 'text-tertiary hover:text-primary hover:bg-surface-elevated/50'
+                }`}
+              >
+                <Cpu className="w-3 h-3 text-purple-400" />
+                Injection MK ({categoryCounts.injection})
+              </button>
+              <button
+                type="button"
+                onClick={() => setMachineCategoryFilter('blow')}
+                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  machineCategoryFilter === 'blow'
+                    ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30 font-bold'
+                    : 'text-tertiary hover:text-primary hover:bg-surface-elevated/50'
+                }`}
+              >
+                <Zap className="w-3 h-3 text-blue-400" />
+                Blow Lines ({categoryCounts.blow})
+              </button>
+              <button
+                type="button"
+                onClick={() => setMachineCategoryFilter('label')}
+                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  machineCategoryFilter === 'label'
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30 font-bold'
+                    : 'text-tertiary hover:text-primary hover:bg-surface-elevated/50'
+                }`}
+              >
+                <Tag className="w-3 h-3 text-amber-400" />
+                Labeling ({categoryCounts.label})
+              </button>
+            </div>
+
+            {/* Status Toggles */}
+            <div className="flex items-center gap-1 bg-canvas p-1 rounded-xl border border-divider/80">
+              <button
+                type="button"
+                onClick={() => setMachineStatusFilter('all')}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all cursor-pointer ${
+                  machineStatusFilter === 'all'
+                    ? 'bg-surface-elevated text-primary font-bold shadow-xs'
+                    : 'text-tertiary hover:text-secondary'
+                }`}
+              >
+                All Status
+              </button>
+              <button
+                type="button"
+                onClick={() => setMachineStatusFilter('running')}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  machineStatusFilter === 'running'
+                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold shadow-xs'
+                    : 'text-tertiary hover:text-secondary'
+                }`}
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                Running ({statusCounts.running})
+              </button>
+              <button
+                type="button"
+                onClick={() => setMachineStatusFilter('idle')}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  machineStatusFilter === 'idle'
+                    ? 'bg-slate-500/20 text-slate-300 border border-slate-500/30 font-bold shadow-xs'
+                    : 'text-tertiary hover:text-secondary'
+                }`}
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
+                Idle ({statusCounts.idle})
+              </button>
+              <button
+                type="button"
+                onClick={() => setMachineStatusFilter('maintenance')}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  machineStatusFilter === 'maintenance'
+                    ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30 font-bold shadow-xs'
+                    : 'text-tertiary hover:text-secondary'
+                }`}
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-rose-400"></span>
+                Paused ({statusCounts.maintenance})
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* 1. SPREADSHEET MATRIX VIEW MODE */}
         {viewMode === 'Spreadsheet' && (() => {
-          const sortedMachinesList = getSortedMachines();
+          const sortedMachinesList = getFilteredMachines();
           const activeMachines = sortedMachinesList.filter(mach => {
             const sequence = getMachineSequence(mach.name);
             const activeOrder = sequence.length > 0 ? sequence[0] : null;
@@ -2395,13 +2906,13 @@ export default function ProductionOrders() {
           const renderTableHeader = () => (
             <thead>
               <tr className="bg-surface-elevated/95 backdrop-blur-md text-secondary border-b border-divider text-[11px] font-bold uppercase tracking-wider select-none sticky top-0 z-20 shadow-xs">
-                <th className="text-center px-3 py-3.5 border-r border-divider/60 font-extrabold w-[64px] text-tertiary">
+                <th className="text-center px-3 py-3.5 border-r border-divider/60 font-extrabold w-[64px] text-tertiary sticky left-0 z-30 bg-surface-elevated/95 backdrop-blur-md">
                   <div className="flex items-center justify-center gap-1">
                     <span className="w-1.5 h-1.5 rounded-full bg-purple-400"></span>
                     <span>M</span>
                   </div>
                 </th>
-                <th className="text-center px-6 py-3.5 border-r border-divider/60 font-bold min-w-[190px] text-indigo-300">
+                <th className="text-center px-6 py-3.5 border-r border-divider/60 font-bold min-w-[190px] text-indigo-300 sticky left-[64px] z-30 bg-surface-elevated/95 backdrop-blur-md">
                   <div className="flex items-center justify-center gap-1.5">
                     <Settings className="w-3.5 h-3.5 text-indigo-400" />
                     <span>Mold / Tooling</span>
@@ -2490,14 +3001,14 @@ export default function ProductionOrders() {
             return (
               <tr key={mach.id} className="hover:bg-surface-elevated/25 transition-all font-medium text-sm text-primary">
                 {/* Column A: M */}
-                <td className="text-center px-3 py-3 border-r border-divider/60 bg-surface/40 font-mono font-bold">
+                <td className="text-center px-3 py-3 border-r border-divider/60 bg-surface/95 backdrop-blur-sm sticky left-0 z-10 font-mono font-bold">
                   <span className="inline-flex items-center justify-center w-8 h-8 rounded-xl bg-surface-elevated border border-divider text-primary font-bold text-xs shadow-xs">
                     {mach.m}
                   </span>
                 </td>
                 
                 {/* Column B1: Mold Name Details Popup Button */}
-                <td className="text-center px-4 py-3 border-r border-divider/60 min-w-[190px]">
+                <td className="text-center px-4 py-3 border-r border-divider/60 min-w-[190px] bg-surface/95 backdrop-blur-sm sticky left-[64px] z-10">
                   <button type="button"
                     onClick={() => {
                       const activeOrd = activeOrder;
@@ -2794,7 +3305,26 @@ export default function ProductionOrders() {
           );
         })()}
 
-        {/* 2. ACTIVE ORDERS LIST VIEW */}
+        {/* 2. MACHINE BOARD COCKPIT VIEW MODE */}
+        {viewMode === 'Board' && (
+          <div className="flex-1 overflow-y-auto bg-surface/10 p-5">
+            {getFilteredMachines().length === 0 ? (
+              <div className="p-12 text-center text-sm border border-dashed border-divider bg-surface/20 rounded-2xl text-tertiary">
+                <div className="flex flex-col items-center justify-center max-w-sm mx-auto">
+                  <Cpu className="w-9 h-9 mb-3 text-tertiary/40" />
+                  <p className="font-semibold text-secondary text-sm">No Machines Found</p>
+                  <p className="text-xs text-tertiary mt-1">No production lines match your current category or status filter.</p>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4">
+                {getFilteredMachines().map(renderMachineCard)}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 3. ACTIVE ORDERS LIST VIEW */}
         {viewMode === 'ActiveList' && (
           <div className="overflow-x-auto flex-1">
             <table className="w-full border-collapse">
@@ -3017,433 +3547,461 @@ export default function ProductionOrders() {
 
       {/* MODAL - CREATE/EDIT PRODUCTION ORDER */}
       {isCreatingOrder && (
-        <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-surface border border-divider rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
-             <div className="px-6 py-4 border-b border-divider flex items-center justify-between shrink-0 bg-surface-elevated/20">
-              <h3 className="text-lg font-semibold text-primary flex items-center gap-2">
-                <ClipboardList className="w-5 h-5 text-purple-400" />
-                {editingOrder ? 'Edit Production Order Specifications' : 'Schedule New Production Run'}
-              </h3>
+        <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-surface border border-divider rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[92vh]">
+            <div className="px-6 py-4 border-b border-divider/70 flex items-center justify-between shrink-0 bg-surface-elevated/30">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-purple-500/15 border border-purple-500/30 flex items-center justify-center text-purple-400 shrink-0 shadow-xs">
+                  <ClipboardList className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-primary flex items-center gap-2">
+                    {editingOrder ? 'Edit Production Order Specifications' : 'Schedule New Production Run'}
+                  </h3>
+                  <p className="text-xs text-tertiary mt-0.5">
+                    {editingOrder ? `Updating specifications for #${editingOrder.id}` : 'Assign machinery, configure mold speeds, and dispatch job into queue.'}
+                  </p>
+                </div>
+              </div>
               <button type="button" 
                 onClick={() => { setIsCreatingOrder(false); setEditingOrder(null); }}
-                className="text-tertiary hover:text-primary transition-colors p-1 cursor-pointer"
+                className="text-tertiary hover:text-primary transition-colors p-1.5 hover:bg-surface-elevated rounded-xl cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
             
             <form onSubmit={handleSubmit} onChange={handleFormChange} className="overflow-y-auto p-6 space-y-5 flex-1">
-              <div className="space-y-4">
-                 <div>
-                  <label className="block text-xs font-semibold text-secondary mb-1">Item / Product Name (English or Arabic)</label>
-                  <input
-                    name="itemName"
-                    defaultValue={editingOrder?.itemName}
-                    className="w-full px-4 py-2 bg-canvas text-primary border border-surface-elevated rounded-lg text-sm face-ring-purple outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
-                    placeholder="مثال: سطل سليمانية 2 كغم"
-                  />
-                </div>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                {/* Left Column: Identity, Machine, Formulation */}
+                <div className="space-y-4">
+                  {/* Card: Job Identity & Machinery */}
+                  <div className="p-4 bg-surface-elevated/20 border border-divider/70 rounded-2xl space-y-3.5">
+                    <h4 className="text-xs font-bold text-purple-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <Factory className="w-3.5 h-3.5" /> Job Identity & Machinery
+                    </h4>
 
-                <div>
-                  <label className="block text-xs font-semibold text-secondary mb-1">Assigned Machine Selection</label>
-                  <select
-                    name="assignedMachine"
-                    value={orderFormAssignedMachine}
-                    onChange={(e) => handleMachineSelectionChange(e.target.value)}
-                    className="w-full px-4 py-2 bg-canvas text-primary border border-surface-elevated rounded-lg text-sm outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
-                  >
-                    {machines.map((m) => (
-                      <option key={m.id} value={m.name}>
-                        {m.m} - {m.name} {m.type ? `(${m.type.toUpperCase()})` : ''}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-secondary mb-1">Raw Material / Granules</label>
-                    <input
-                      name="granulesType"
-                      defaultValue={editingOrder?.granulesType || ''}
-                      className="w-full px-4 py-2 bg-canvas text-primary border border-surface-elevated rounded-lg text-sm outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
-                      placeholder="e.g. C440 + Polypropylene"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-secondary mb-1">Color / Masterbatch</label>
-                    <input
-                      name="colorant"
-                      defaultValue={editingOrder?.colorant}
-                      className="w-full px-4 py-2 bg-canvas text-primary border border-surface-elevated rounded-lg text-sm outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
-                      placeholder="مثال: ابيض / برتقالي"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-secondary mb-1">Packaging Details</label>
-                    <input
-                      name="packagingDetails"
-                      defaultValue={editingOrder?.packagingDetails || ''}
-                      className="w-full px-4 py-2 bg-canvas text-primary border border-surface-elevated rounded-lg text-sm outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
-                      placeholder="مثال: تعبئة كيس 210 عدد"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-secondary mb-1">Unit</label>
-                    <select
-                      name="unit"
-                      defaultValue={getOrderUnit(editingOrder)}
-                      className="w-full px-4 py-2 bg-canvas text-primary border border-surface-elevated rounded-lg text-sm outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
-                    >
-                      <option value="pcs">Pieces (pcs)</option>
-                      <option value="kg">Kilograms (kg)</option>
-                      <option value="tons">Tons</option>
-                      <option value="pallets">Pallets</option>
-                      <option value="sacks">Sacks</option>
-                      <option value="bags">Bags</option>
-                    </select>
-                  </div>
-                </div>
-
-                {/* PRODUCTION SPEED & CYCLE METRICS SECTION */}
-                <div className="p-4 bg-surface-elevated/40 border border-divider rounded-xl space-y-3.5">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <div>
-                      <div className="text-xs font-bold text-primary flex items-center gap-1.5">
-                        <Gauge className="w-4 h-4 text-purple-400" />
-                        Production Speed & Cycle Parameters (معايير السرعة وزمن الدورة)
-                      </div>
-                      <p className="text-[11px] text-secondary mt-0.5">
-                        Configure cycle time & cavities for injection, or hourly rate for blow/label machines.
-                      </p>
-                    </div>
-
-                    <div className="flex items-center bg-canvas p-1 rounded-lg border border-divider shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => setOrderFormRateMethod('cycle')}
-                        className={`px-3 py-1 text-xs font-semibold rounded-md transition-all cursor-pointer ${
-                          orderFormRateMethod === 'cycle'
-                            ? 'bg-purple-600 text-white shadow-sm'
-                            : 'text-tertiary hover:text-primary'
-                        }`}
-                      >
-                        Cycle Time & Cavities
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setOrderFormRateMethod('hourly')}
-                        className={`px-3 py-1 text-xs font-semibold rounded-md transition-all cursor-pointer ${
-                          orderFormRateMethod === 'hourly'
-                            ? 'bg-cyan-600 text-white shadow-sm'
-                            : 'text-tertiary hover:text-primary'
-                        }`}
-                      >
-                        Hourly Speed
-                      </button>
-                    </div>
-                  </div>
-
-                  {orderFormRateMethod === 'cycle' ? (
-                    <div className="space-y-3">
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-xs font-semibold text-secondary mb-1">
-                            Cycle Time (Seconds / زمن الدورة بالثواني)
-                          </label>
-                          <div className="relative">
-                            <input
-                              type="number"
-                              name="cycleTime"
-                              step="any"
-                              min="0.1"
-                              value={orderFormCycleTime}
-                              onChange={(e) => setOrderFormCycleTime(Number(e.target.value))}
-                              className="w-full px-3.5 py-2 bg-canvas text-primary border border-surface-elevated rounded-lg text-sm font-mono font-bold outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
-                              placeholder="e.g. 12"
-                            />
-                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-mono text-tertiary">sec</span>
-                          </div>
-                        </div>
-
-                        <div>
-                          <label className="block text-xs font-semibold text-secondary mb-1">
-                            Active Cavities (عدد العيون)
-                          </label>
-                          <div className="relative">
-                            <input
-                              type="number"
-                              name="cavities"
-                              min="1"
-                              max="128"
-                              value={orderFormCavities}
-                              onChange={(e) => setOrderFormCavities(Math.max(1, Math.round(Number(e.target.value))))}
-                              className="w-full px-3.5 py-2 bg-canvas text-primary border border-surface-elevated rounded-lg text-sm font-mono font-bold outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
-                              placeholder="e.g. 1"
-                            />
-                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-mono text-tertiary">cav</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {orderFormCycleTime > 0 && orderFormCavities > 0 && (
-                        <div className="grid grid-cols-2 gap-2 text-center pt-1">
-                          <div className="p-2 bg-canvas/60 rounded-lg border border-divider">
-                            <span className="text-[10px] text-tertiary block font-medium">Shots / Minute</span>
-                            <span className="text-xs font-mono font-bold text-secondary">
-                              {(60 / orderFormCycleTime).toFixed(1)} /min
-                            </span>
-                          </div>
-                          <div className="p-2 bg-canvas/60 rounded-lg border border-divider">
-                            <span className="text-[10px] text-tertiary block font-medium">Estimated Output</span>
-                            <span className="text-xs font-mono font-bold text-purple-400">
-                              {Math.round((3600 / orderFormCycleTime) * orderFormCavities).toLocaleString()} pcs/hr
-                            </span>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      <div>
-                        <label className="block text-xs font-semibold text-secondary mb-1">
-                          Hourly Production Rate (معدل الإنتاج بالساعة)
-                        </label>
-                        <div className="relative">
-                          <input
-                            type="number"
-                            name="hourlyRate"
-                            min="0"
-                            step="10"
-                            value={orderFormHourlyRate}
-                            onChange={(e) => setOrderFormHourlyRate(Math.max(0, Number(e.target.value)))}
-                            className="w-full px-3.5 py-2 bg-canvas text-primary border border-surface-elevated rounded-lg text-sm font-mono font-bold outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500"
-                            placeholder="e.g. 2400"
-                          />
-                          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-mono text-tertiary">bottles/hr</span>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="text-[11px] text-tertiary font-medium mr-1">Presets:</span>
-                        {[1000, 1500, 2000, 2400, 3000, 3500, 4500, 6000].map((preset) => (
-                          <button
-                            key={preset}
-                            type="button"
-                            onClick={() => setOrderFormHourlyRate(preset)}
-                            className={`text-xs font-mono px-2 py-0.5 rounded-md border transition-all cursor-pointer ${
-                              orderFormHourlyRate === preset
-                                ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40 font-bold'
-                                : 'bg-canvas text-secondary hover:text-primary hover:bg-surface-elevated border-divider'
-                            }`}
-                          >
-                            {preset.toLocaleString()}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {editingOrder && (
-                    <div className="flex items-center justify-between pt-1 text-[11px] text-tertiary">
-                      <span>Saved: {editingOrder.cycleTime ? `${editingOrder.cycleTime}s cycle, ${editingOrder.cavities || 1} cav` : `${editingOrder.hourlyRate || 1000} /hr`}</span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const machObj = machines.find(m => m.name === orderFormAssignedMachine);
-                          if (machObj) {
-                            const isBlow = machObj.type === 'blow' || machObj.name.toUpperCase().includes('BLOW');
-                            const isLabel = machObj.type === 'label' || machObj.name.toUpperCase().includes('LABEL');
-                            const defMethod = (isBlow || isLabel) ? 'hourly' : 'cycle';
-                            setOrderFormRateMethod(machObj.rateMethod || defMethod);
-                            setOrderFormCycleTime(machObj.cycleTime ?? 12);
-                            setOrderFormCavities(machObj.cavities ?? 1);
-                            setOrderFormHourlyRate(machObj.hourlyRate ?? (isBlow ? 2400 : isLabel ? 3500 : 1000));
-                          }
-                        }}
-                        className="text-purple-400 hover:text-purple-300 underline font-medium cursor-pointer"
-                      >
-                        Reset to {orderFormAssignedMachine} machine defaults
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                {/* CONTINUOUS PRODUCTION OPTION */}
-                <div className={`p-4 rounded-xl border transition-all ${isContinuousOrder ? 'bg-purple-950/30 border-purple-500/50 shadow-inner' : 'bg-surface-elevated/30 border-divider'}`}>
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      <div className={`p-2.5 rounded-lg shrink-0 transition-colors ${isContinuousOrder ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40' : 'bg-surface-elevated text-tertiary'}`}>
-                        <Infinity className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <div className="text-xs font-bold text-primary flex items-center gap-2">
-                          Continuous Production (No Target Limit)
-                          {isContinuousOrder ? (
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40 animate-pulse">
-                              Active • Runs Until Stopped
-                            </span>
-                          ) : (
-                            <span className="text-[10px] font-normal text-tertiary">
-                              (إنتاج مستمر بدون حد كمية)
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-[11px] text-secondary mt-0.5">
-                          {isContinuousOrder 
-                            ? 'The machine will run continuously without a fixed target quantity until manually stopped.'
-                            : 'Enable to run open-ended production without a fixed target limit.'}
-                        </p>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setIsContinuousOrder(!isContinuousOrder)}
-                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${isContinuousOrder ? 'bg-purple-600' : 'bg-surface-elevated border border-divider'}`}
-                      role="switch"
-                      aria-checked={isContinuousOrder}
-                    >
-                      <span
-                        aria-hidden="true"
-                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${isContinuousOrder ? 'translate-x-5' : 'translate-x-0'}`}
-                      />
-                    </button>
-                  </div>
-                </div>
-
-                {!isContinuousOrder ? (
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-xs font-semibold text-secondary mb-1">Crates / Bags Quantity (Boxs)</label>
-                        <input
-                          name="cratesQuantity"
-                          type="number"
-                          defaultValue={editingOrder?.cratesQuantity}
-                          className="w-full px-4 py-2 bg-canvas text-primary border border-surface-elevated rounded-lg text-sm outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
-                          placeholder="مثال: 47 Boxs"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-semibold text-secondary mb-1">Loose Items Quantity</label>
-                        <input
-                          name="looseQuantity"
-                          type="number"
-                          defaultValue={editingOrder?.looseQuantity}
-                          className="w-full px-4 py-2 bg-canvas text-primary border border-surface-elevated rounded-lg text-sm outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
-                          placeholder="مثال: 130"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-xs font-semibold text-secondary mb-1">Target Quantity (الكمية المستهدفة)</label>
-                        <input
-                          name="quantity"
-                          type="number"
-                          min="1"
-                          defaultValue={editingOrder?.quantity || ''}
-                          className="w-full px-4 py-2 bg-canvas text-primary border border-surface-elevated rounded-lg text-sm outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
-                          placeholder="e.g. 10000"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-semibold text-secondary mb-1">Produced Quantity (الكمية المنجزة)</label>
-                        <input
-                          name="producedQuantity"
-                          type="number"
-                          min="0"
-                          defaultValue={editingOrder ? getProducedCount(editingOrder) : 0}
-                          className="w-full px-4 py-2 bg-canvas text-primary border border-surface-elevated rounded-lg text-sm outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
-                          placeholder="0"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="p-3.5 bg-canvas border border-purple-500/30 rounded-xl space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold text-secondary">Target Quantity Mode:</span>
-                      <span className="text-xs font-bold text-purple-400 flex items-center gap-1.5 bg-purple-500/15 px-2.5 py-0.5 rounded-lg border border-purple-500/30">
-                        <Infinity className="w-3.5 h-3.5" /> Continuous (No Limit)
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-tertiary leading-relaxed">
-                      Target quantity is unrestricted. You can manually update the achieved quantity whenever needed.
-                    </p>
-                    <div>
-                      <label className="block text-xs font-semibold text-secondary mb-1">Produced Quantity (الكمية المنجزة)</label>
+                      <label className="block text-xs font-semibold text-secondary mb-1">
+                        Item / Product Name (English or Arabic)<span className="text-rose-400">*</span>
+                      </label>
                       <input
-                        name="producedQuantity"
-                        type="number"
-                        min="0"
-                        defaultValue={editingOrder ? getProducedCount(editingOrder) : 0}
-                        className="w-full px-4 py-2 bg-canvas text-primary border border-surface-elevated rounded-lg text-sm outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
-                        placeholder="0"
+                        name="itemName"
+                        required
+                        defaultValue={editingOrder?.itemName}
+                        className="w-full px-3.5 py-2 bg-canvas text-primary border border-divider rounded-xl text-sm outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all font-medium"
+                        placeholder="مثال: سطل سليمانية 2 كغم"
+                        dir="rtl"
                       />
                     </div>
-                    <input type="hidden" name="quantity" value="0" />
-                    <input type="hidden" name="cratesQuantity" value="" />
-                    <input type="hidden" name="looseQuantity" value="" />
-                  </div>
-                )}
 
+                    <div>
+                      <label className="block text-xs font-semibold text-secondary mb-1">
+                        Assigned Machine Selection
+                      </label>
+                      <select
+                        name="assignedMachine"
+                        value={orderFormAssignedMachine}
+                        onChange={(e) => handleMachineSelectionChange(e.target.value)}
+                        className="w-full px-3.5 py-2 bg-canvas text-primary border border-divider rounded-xl text-sm outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all cursor-pointer font-medium"
+                      >
+                        {machines.map((m) => (
+                          <option key={m.id} value={m.name}>
+                            {m.m} - {m.name} {m.type ? `(${m.type.toUpperCase()})` : ''} • {m.moldName || 'Default'}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-secondary mb-1">Date Entered</label>
-                    <input
-                      name="dateEntered"
-                      type="date"
-                      defaultValue={editingOrder?.dateEntered || new Date().toISOString().split('T')[0]}
-                      className="w-full px-4 py-2 bg-canvas text-primary border border-surface-elevated rounded-lg text-sm outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
-                    />
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-secondary mb-1">Schedule Window</label>
+                        <input
+                          name="startDate"
+                          type="date"
+                          defaultValue={editingOrder?.startDate || new Date().toISOString().split('T')[0]}
+                          className="w-full px-3 py-1.5 bg-canvas text-primary border border-divider rounded-xl text-xs outline-none focus:border-purple-500 font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-secondary mb-1">Target End Date</label>
+                        <input
+                          name="endDate"
+                          type="date"
+                          defaultValue={editingOrder?.endDate || new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0]}
+                          className="w-full px-3 py-1.5 bg-canvas text-primary border border-divider rounded-xl text-xs outline-none focus:border-purple-500 font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-secondary mb-1">Date Entered</label>
+                        <input
+                          name="dateEntered"
+                          type="date"
+                          defaultValue={editingOrder?.dateEntered || new Date().toISOString().split('T')[0]}
+                          className="w-full px-3 py-1.5 bg-canvas text-primary border border-divider rounded-xl text-xs outline-none focus:border-purple-500 font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-secondary mb-1">Status</label>
+                        <select
+                          name="status"
+                          defaultValue={editingOrder?.status || 'Planned'}
+                          className="w-full px-3 py-1.5 bg-canvas text-primary border border-divider rounded-xl text-xs outline-none focus:border-purple-500 font-medium"
+                        >
+                          <option value="Planned">Planned (Scheduled)</option>
+                          <option value="In Progress">In Progress (Active run)</option>
+                          <option value="Maintenance">Maintenance (Paused)</option>
+                          <option value="Completed">Completed Archive</option>
+                          <option value="Cancelled">Cancelled</option>
+                        </select>
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-secondary mb-1">Status</label>
-                    <select
-                      name="status"
-                      defaultValue={editingOrder?.status || 'Planned'}
-                      className="w-full px-4 py-2 bg-canvas text-primary border border-surface-elevated rounded-lg text-sm outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
-                    >
-                      <option value="Planned">Planned (Scheduled)</option>
-                      <option value="In Progress">In Progress (Active run)</option>
-                      <option value="Maintenance">Maintenance (Paused)</option>
-                      <option value="Completed">Completed Archive</option>
-                      <option value="Cancelled">Cancelled</option>
-                    </select>
+
+                  {/* Card: Materials & Formulation */}
+                  <div className="p-4 bg-surface-elevated/20 border border-divider/70 rounded-2xl space-y-3.5">
+                    <h4 className="text-xs font-bold text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <Layers className="w-3.5 h-3.5" /> Materials & Formulation
+                    </h4>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-secondary mb-1">Raw Material / Granules</label>
+                        <input
+                          name="granulesType"
+                          defaultValue={editingOrder?.granulesType || ''}
+                          className="w-full px-3 py-2 bg-canvas text-primary border border-divider rounded-xl text-xs outline-none focus:border-purple-500"
+                          placeholder="e.g. PP C440 / HDPE"
+                          dir="rtl"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-secondary mb-1">Color / Masterbatch</label>
+                        <input
+                          name="colorant"
+                          defaultValue={editingOrder?.colorant || ''}
+                          className="w-full px-3 py-2 bg-canvas text-primary border border-divider rounded-xl text-xs outline-none focus:border-purple-500"
+                          placeholder="مثال: أبيض / برتقالي"
+                          dir="rtl"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-secondary mb-1">Packaging Description</label>
+                        <input
+                          name="packagingDetails"
+                          defaultValue={editingOrder?.packagingDetails || ''}
+                          className="w-full px-3 py-2 bg-canvas text-primary border border-divider rounded-xl text-xs outline-none focus:border-purple-500"
+                          placeholder="مثال: كيس 210 عدد / كرتونة"
+                          dir="rtl"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-secondary mb-1">Unit</label>
+                        <select
+                          name="unit"
+                          defaultValue={getOrderUnit(editingOrder)}
+                          className="w-full px-3 py-2 bg-canvas text-primary border border-divider rounded-xl text-xs outline-none focus:border-purple-500"
+                        >
+                          <option value="pcs">Pieces (pcs)</option>
+                          <option value="kg">Kilograms (kg)</option>
+                          <option value="tons">Tons</option>
+                          <option value="pallets">Pallets</option>
+                          <option value="sacks">Sacks</option>
+                          <option value="bags">Bags</option>
+                        </select>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-secondary mb-1">Additional Notes</label>
-                  <textarea
-                    name="notes"
-                    rows={3}
-                    defaultValue={editingOrder?.notes}
-                    className="w-full px-4 py-2 bg-canvas text-primary border border-surface-elevated rounded-lg text-sm outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 resize-none"
-                    placeholder="E.g., Any setup properties, mold ID, or emergency comments..."
-                  ></textarea>
+                {/* Right Column: Speed/Cycles, Quantities, Directives */}
+                <div className="space-y-4">
+                  {/* Card: Production Speed & Engineering Parameters */}
+                  <div className="p-4 bg-surface-elevated/20 border border-divider/70 rounded-2xl space-y-3.5">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                        <Gauge className="w-3.5 h-3.5" /> Speed & Cycle Engineering
+                      </h4>
+
+                      <div className="flex items-center bg-canvas p-1 rounded-xl border border-divider shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setOrderFormRateMethod('cycle')}
+                          className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${
+                            orderFormRateMethod === 'cycle'
+                              ? 'bg-purple-600 text-white shadow-xs'
+                              : 'text-tertiary hover:text-secondary'
+                          }`}
+                        >
+                          Cycle & Cavities
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setOrderFormRateMethod('hourly')}
+                          className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${
+                            orderFormRateMethod === 'hourly'
+                              ? 'bg-cyan-600 text-white shadow-xs'
+                              : 'text-tertiary hover:text-secondary'
+                          }`}
+                        >
+                          Hourly Speed
+                        </button>
+                      </div>
+                    </div>
+
+                    {orderFormRateMethod === 'cycle' ? (
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs font-semibold text-secondary mb-1">
+                              Cycle Time (Seconds / زمن الدورة)
+                            </label>
+                            <div className="relative">
+                              <input
+                                type="number"
+                                name="cycleTime"
+                                step="any"
+                                min="0.1"
+                                value={orderFormCycleTime}
+                                onChange={(e) => setOrderFormCycleTime(Number(e.target.value))}
+                                className="w-full px-3 py-2 bg-canvas text-primary border border-divider rounded-xl text-xs font-mono font-bold outline-none focus:border-purple-500"
+                                placeholder="12"
+                              />
+                              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-mono text-tertiary">sec</span>
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block text-xs font-semibold text-secondary mb-1">
+                              Active Cavities (عدد العيون)
+                            </label>
+                            <div className="relative">
+                              <input
+                                type="number"
+                                name="cavities"
+                                min="1"
+                                max="128"
+                                value={orderFormCavities}
+                                onChange={(e) => setOrderFormCavities(Math.max(1, Math.round(Number(e.target.value))))}
+                                className="w-full px-3 py-2 bg-canvas text-primary border border-divider rounded-xl text-xs font-mono font-bold outline-none focus:border-purple-500"
+                                placeholder="1"
+                              />
+                              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-mono text-tertiary">cav</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {orderFormCycleTime > 0 && orderFormCavities > 0 && (
+                          <div className="grid grid-cols-2 gap-2 text-center pt-1">
+                            <div className="p-2 bg-canvas/70 rounded-xl border border-divider/60">
+                              <span className="text-[10px] text-tertiary block font-medium">Shots / Minute</span>
+                              <span className="text-xs font-mono font-bold text-secondary">
+                                {(60 / orderFormCycleTime).toFixed(1)} /min
+                              </span>
+                            </div>
+                            <div className="p-2 bg-canvas/70 rounded-xl border border-divider/60">
+                              <span className="text-[10px] text-tertiary block font-medium">Calculated Output</span>
+                              <span className="text-xs font-mono font-bold text-purple-400">
+                                {Math.round((3600 / orderFormCycleTime) * orderFormCavities).toLocaleString()} pcs/hr
+                              </span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <div>
+                          <label className="block text-xs font-semibold text-secondary mb-1">
+                            Hourly Production Rate (معدل الإنتاج بالساعة)
+                          </label>
+                          <div className="relative">
+                            <input
+                              type="number"
+                              name="hourlyRate"
+                              min="0"
+                              step="10"
+                              value={orderFormHourlyRate}
+                              onChange={(e) => setOrderFormHourlyRate(Math.max(0, Number(e.target.value)))}
+                              className="w-full px-3.5 py-2 bg-canvas text-primary border border-divider rounded-xl text-xs font-mono font-bold outline-none focus:border-cyan-500"
+                              placeholder="2400"
+                            />
+                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-mono text-tertiary">bph</span>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-[10px] text-tertiary font-medium mr-1">Presets:</span>
+                          {[1000, 1500, 2000, 2400, 3000, 3500, 4500].map((preset) => (
+                            <button
+                              key={preset}
+                              type="button"
+                              onClick={() => setOrderFormHourlyRate(preset)}
+                              className={`text-[11px] font-mono px-2 py-0.5 rounded-lg border transition-all cursor-pointer ${
+                                orderFormHourlyRate === preset
+                                  ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40 font-bold'
+                                  : 'bg-canvas text-secondary hover:text-primary border-divider'
+                              }`}
+                            >
+                              {preset.toLocaleString()}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Card: Target Quantities & Continuous (∞) */}
+                  <div className={`p-4 rounded-2xl border transition-all ${
+                    isContinuousOrder ? 'bg-purple-950/20 border-purple-500/40 shadow-inner' : 'bg-surface-elevated/20 border-divider/70'
+                  }`}>
+                    <div className="flex items-center justify-between gap-3 mb-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className={`p-2 rounded-xl shrink-0 transition-colors ${
+                          isContinuousOrder ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40' : 'bg-surface-elevated text-tertiary'
+                        }`}>
+                          <Infinity className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <div className="text-xs font-bold text-primary flex items-center gap-2">
+                            Continuous Production (∞)
+                            {isContinuousOrder && (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40 animate-pulse">
+                                Active • No Limit
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-tertiary mt-0.5">
+                            {isContinuousOrder ? 'Runs continuously until manually stopped.' : 'Run open-ended without fixed target quantity.'}
+                          </p>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setIsContinuousOrder(!isContinuousOrder)}
+                        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                          isContinuousOrder ? 'bg-purple-600' : 'bg-surface-elevated border border-divider'
+                        }`}
+                        role="switch"
+                        aria-checked={isContinuousOrder}
+                      >
+                        <span
+                          aria-hidden="true"
+                          className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                            isContinuousOrder ? 'translate-x-5' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
+                    </div>
+
+                    {!isContinuousOrder ? (
+                      <div className="space-y-3 pt-1">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs font-semibold text-secondary mb-1">Crates / Bags Quantity (Boxs)</label>
+                            <input
+                              name="cratesQuantity"
+                              type="number"
+                              defaultValue={editingOrder?.cratesQuantity}
+                              className="w-full px-3 py-2 bg-canvas text-primary border border-divider rounded-xl text-xs outline-none focus:border-purple-500"
+                              placeholder="مثال: 47 Boxs"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-secondary mb-1">Loose Items Quantity</label>
+                            <input
+                              name="looseQuantity"
+                              type="number"
+                              defaultValue={editingOrder?.looseQuantity}
+                              className="w-full px-3 py-2 bg-canvas text-primary border border-divider rounded-xl text-xs outline-none focus:border-purple-500"
+                              placeholder="مثال: 130"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs font-semibold text-secondary mb-1">Target Quantity (الكمية المستهدفة)</label>
+                            <input
+                              name="quantity"
+                              type="number"
+                              min="1"
+                              defaultValue={editingOrder?.quantity || ''}
+                              className="w-full px-3.5 py-2 bg-canvas text-primary border border-divider rounded-xl text-xs font-mono font-bold outline-none focus:border-purple-500"
+                              placeholder="10000"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-secondary mb-1">Produced Quantity (الكمية المنجزة)</label>
+                            <input
+                              name="producedQuantity"
+                              type="number"
+                              min="0"
+                              defaultValue={editingOrder ? getProducedCount(editingOrder) : 0}
+                              className="w-full px-3.5 py-2 bg-canvas text-primary border border-divider rounded-xl text-xs font-mono font-bold outline-none focus:border-purple-500"
+                              placeholder="0"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-2 pt-1">
+                        <div>
+                          <label className="block text-xs font-semibold text-secondary mb-1">Produced Quantity (الكمية المنجزة)</label>
+                          <input
+                            name="producedQuantity"
+                            type="number"
+                            min="0"
+                            defaultValue={editingOrder ? getProducedCount(editingOrder) : 0}
+                            className="w-full px-3.5 py-2 bg-canvas text-primary border border-divider rounded-xl text-xs font-mono font-bold outline-none focus:border-purple-500"
+                            placeholder="0"
+                          />
+                        </div>
+                        <input type="hidden" name="quantity" value="0" />
+                        <input type="hidden" name="cratesQuantity" value="" />
+                        <input type="hidden" name="looseQuantity" value="" />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Card: Directives & Notes */}
+                  <div className="p-4 bg-surface-elevated/20 border border-divider/70 rounded-2xl space-y-2">
+                    <label className="block text-xs font-bold text-tertiary uppercase tracking-wider">
+                      Floor Directives & Shift Comments
+                    </label>
+                    <textarea
+                      name="notes"
+                      rows={2}
+                      defaultValue={editingOrder?.notes}
+                      className="w-full px-3.5 py-2 bg-canvas text-primary border border-divider rounded-xl text-xs outline-none focus:border-purple-500 resize-none font-sans"
+                      placeholder="E.g., Any setup properties, mold ID, or emergency comments..."
+                      dir="rtl"
+                    ></textarea>
+                  </div>
                 </div>
               </div>
 
-              <div className="pt-4 border-t border-divider flex justify-end gap-3 sticky bottom-0 bg-surface">
+              {/* Sticky Modal Footer */}
+              <div className="pt-4 border-t border-divider flex items-center justify-end gap-3 sticky bottom-0 bg-surface">
                 <button
                   type="button"
                   onClick={() => { setIsCreatingOrder(false); setEditingOrder(null); }}
-                  className="px-4 py-2 text-xs font-semibold text-secondary hover:text-primary hover:bg-surface-elevated rounded-lg transition-all cursor-pointer"
+                  className="px-4 py-2 text-xs font-semibold text-secondary hover:text-primary hover:bg-surface-elevated rounded-xl transition cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-6 py-2 text-xs font-semibold text-white bg-purple-600 hover:bg-purple-500 rounded-lg transition-all shadow-sm cursor-pointer"
+                  className="px-6 py-2.5 text-xs font-bold text-white bg-purple-600 hover:bg-purple-500 rounded-xl transition shadow-md shadow-purple-600/25 active:scale-95 cursor-pointer flex items-center gap-1.5"
                 >
-                  {editingOrder ? 'Save Specifications' : 'Schedule Queue Run'}
+                  <Check className="w-4 h-4" />
+                  <span>{editingOrder ? 'Save Specifications' : 'Schedule Queue Run'}</span>
                 </button>
               </div>
             </form>
@@ -3451,86 +4009,147 @@ export default function ProductionOrders() {
         </div>
       )}
 
-      {/* MODAL - VIEW DETAILED SPECIFICATIONS */}
-      {viewingOrder && (
-        <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-surface border border-divider rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
-            <div className="px-6 py-4 border-b border-divider flex items-center justify-between shrink-0 bg-surface-elevated/30">
-              <div className="flex items-center gap-3">
-                 <div className="w-10 h-10 rounded-lg bg-surface flex items-center justify-center shrink-0 border border-divider-subtle">
-                   {getStatusIcon(viewingOrder.status)}
-                 </div>
-                 <div>
-                  <h3 className="text-[15px] font-bold text-primary">
-                    <bdi dir="rtl" className="block">{viewingOrder.itemName}</bdi>
-                  </h3>
-                  <p className="text-xs text-secondary font-mono mt-0.5">
-                    {viewingOrder.id}
-                  </p>
-                 </div>
+      {/* MODAL - VIEW DETAILED SPECIFICATIONS & PRODUCTION COCKPIT HUD */}
+      {viewingOrder && (() => {
+        const produced = getProducedCount(viewingOrder);
+        const target = viewingOrder.quantity || 0;
+        const pct = (!viewingOrder.isContinuous && target > 0) ? Math.min(100, Math.round((produced / target) * 100)) : 0;
+        const remaining = Math.max(0, target - produced);
+
+        return (
+          <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-md flex items-center justify-center p-4">
+            <div className="bg-surface border border-divider/70 rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[92vh]">
+              {/* Cockpit HUD Header */}
+              <div className="px-6 py-4 border-b border-divider/70 flex items-center justify-between shrink-0 bg-surface-elevated/30">
+                <div className="flex items-center gap-3.5">
+                  <div className="w-11 h-11 rounded-2xl bg-surface border border-divider flex items-center justify-center shrink-0 shadow-xs">
+                    {getStatusIcon(viewingOrder.status)}
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-bold text-primary">
+                        <bdi dir="rtl">{viewingOrder.itemName}</bdi>
+                      </h3>
+                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold border ${getStatusStyle(viewingOrder.status)}`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${viewingOrder.status === 'In Progress' ? 'bg-emerald-400 animate-pulse' : viewingOrder.status === 'Maintenance' ? 'bg-rose-400' : 'bg-slate-400'}`}></span>
+                        <span>{viewingOrder.status}</span>
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-tertiary font-mono mt-0.5">
+                      <span className="bg-surface-elevated px-2 py-0.2 rounded border border-divider-subtle">{viewingOrder.id}</span>
+                      <span>•</span>
+                      <span className="text-purple-300 font-semibold flex items-center gap-1">
+                        <Settings className="w-3 h-3" /> {viewingOrder.assignedMachine}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <button type="button" 
+                  onClick={() => setViewingOrder(null)}
+                  className="text-tertiary hover:text-primary transition-colors p-1.5 hover:bg-surface-elevated rounded-xl cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
               </div>
-              <button type="button" 
-                onClick={() => setViewingOrder(null)}
-                className="text-tertiary hover:text-primary transition-colors p-1 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            
-            <div className="overflow-y-auto p-6 space-y-6 flex-1">
-               <div className="flex gap-4">
-                  <div className="px-4 py-2 bg-surface-elevated border border-divider-subtle rounded-lg flex-1">
-                     <div className="text-[9px] uppercase font-bold tracking-wider text-tertiary mb-1">Status</div>
-                     <div className={`text-xs font-medium px-2 py-0.5 rounded-lg inline-flex ${getStatusStyle(viewingOrder.status)}`}>
-                        {viewingOrder.status}
-                     </div>
+              
+              <div className="overflow-y-auto p-6 space-y-5 flex-1">
+                {/* Top Diagnostic HUD Cards */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                  {/* Card 1: Completion Progress */}
+                  <div className="p-4 bg-surface-elevated/30 border border-divider/70 rounded-2xl flex flex-col justify-between shadow-xs">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-tertiary">
+                      Completion Progress
+                    </span>
+                    <div className="mt-2 mb-2 flex items-baseline justify-between">
+                      {viewingOrder.isContinuous ? (
+                        <span className="text-lg font-bold text-purple-400 flex items-center gap-1.5">
+                          <Infinity className="w-5 h-5" /> Continuous Run
+                        </span>
+                      ) : (
+                        <>
+                          <span className="text-2xl font-bold font-mono text-emerald-400">
+                            {pct}%
+                          </span>
+                          <span className="text-xs text-tertiary font-mono">
+                            {remaining.toLocaleString()} left
+                          </span>
+                        </>
+                      )}
+                    </div>
+                    <div className="h-2 w-full bg-surface rounded-full overflow-hidden border border-divider-subtle">
+                      {viewingOrder.isContinuous ? (
+                        <div className="h-full w-full bg-gradient-to-r from-purple-500/30 via-purple-400 to-purple-500/30" />
+                      ) : (
+                        <div 
+                          className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-full transition-all duration-300"
+                          style={{ width: `${Math.max(2, pct)}%` }}
+                        />
+                      )}
+                    </div>
                   </div>
-                  <div className="px-4 py-2 bg-surface-elevated border border-divider-subtle rounded-lg flex-1">
-                     <div className="text-[9px] uppercase font-bold tracking-wider text-tertiary mb-1">Target Quantity</div>
-                     <div className="text-xs font-bold text-secondary flex items-center gap-1.5 mt-1">
-                       {viewingOrder.isContinuous ? (
-                         <span className="text-purple-400 font-bold flex items-center gap-1.5">
-                           <Infinity className="w-4 h-4" /> Continuous (∞)
-                         </span>
-                       ) : (
-                         <>
-                           <Scale className="w-3.5 h-3.5 text-tertiary" />
-                           {viewingOrder.quantity?.toLocaleString()} {getOrderUnit(viewingOrder)}
-                         </>
-                       )}
-                     </div>
+
+                  {/* Card 2: Total Units Produced / Target */}
+                  <div className="p-4 bg-surface-elevated/30 border border-divider/70 rounded-2xl flex flex-col justify-between shadow-xs">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-tertiary">
+                      Floor Yield Produced
+                    </span>
+                    <div className="mt-2">
+                      <div className="text-xl font-bold font-mono text-primary flex items-center gap-1.5">
+                        <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                        <span>{produced.toLocaleString()}</span>
+                        <span className="text-xs font-normal text-tertiary">{getOrderUnit(viewingOrder)}</span>
+                      </div>
+                      <p className="text-xs text-tertiary mt-1">
+                        Target: <strong className="text-secondary font-mono">{viewingOrder.isContinuous ? '∞ (No limit)' : `${target.toLocaleString()} ${getOrderUnit(viewingOrder)}`}</strong>
+                      </p>
+                    </div>
                   </div>
-                  <div className="px-4 py-2 bg-surface-elevated border border-divider-subtle rounded-lg flex-1">
-                     <div className="text-[9px] uppercase font-bold tracking-wider text-tertiary mb-1">Total Produced QTY</div>
-                     <div className="text-xs font-bold text-emerald-400 flex items-center gap-1.5 mt-1">
-                       <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                       {getProducedCount(viewingOrder).toLocaleString()} {getOrderUnit(viewingOrder)}
-                       {viewingOrder.isContinuous && <span className="text-purple-400 text-[10px]">(∞ Run)</span>}
-                     </div>
+
+                  {/* Card 3: Machine & Speed Specs */}
+                  <div className="p-4 bg-surface-elevated/30 border border-divider/70 rounded-2xl flex flex-col justify-between shadow-xs">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-tertiary">
+                      Machine & Speed Telemetry
+                    </span>
+                    <div className="mt-2">
+                      <div className="text-sm font-bold text-secondary flex items-center gap-1.5">
+                        <Gauge className="w-4 h-4 text-purple-400 shrink-0" />
+                        <span>
+                          {viewingOrder.productionRateMethod === 'hourly'
+                            ? `${viewingOrder.hourlyRate?.toLocaleString() || 2400} bph`
+                            : `${viewingOrder.cycleTime || 12}s cycle (${viewingOrder.cavities || 1} cav)`}
+                        </span>
+                      </div>
+                      <p className="text-xs text-tertiary mt-1 flex items-center gap-1 font-mono">
+                        <Calendar className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                        <span>{viewingOrder.startDate} ➔ {viewingOrder.endDate}</span>
+                      </p>
+                    </div>
                   </div>
-               </div>
-               
-               <div className="px-6 py-5 bg-surface-elevated border border-divider-subtle rounded-xl space-y-3">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-divider-subtle">
+                </div>
+
+                {/* Live Floor Output Tracker Card */}
+                <div className="p-5 bg-surface-elevated/20 border border-divider/70 rounded-2xl space-y-3.5 shadow-xs">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-divider/60">
                     <div>
-                      <div className="text-[10px] uppercase font-bold tracking-wider text-purple-400">
-                        Live Production Output Tracker
+                      <div className="text-xs font-bold uppercase tracking-wider text-purple-400 flex items-center gap-1.5">
+                        <TrendingUp className="w-4 h-4" /> Live Floor Output Tracker (معدل الإنتاج الفعلي)
                       </div>
                       <p className="text-xs text-secondary mt-0.5">
-                        Update actual floor production count directly
+                        Adjust completed output manually via direct unit count or crate packing formula.
                       </p>
                     </div>
 
                     {!isViewer && (
                       <div className="flex flex-wrap items-center gap-2">
                         {/* Produced vs Remaining */}
-                        <div className="flex items-center bg-canvas p-1 rounded-lg border border-divider">
+                        <div className="flex items-center bg-canvas p-1 rounded-xl border border-divider">
                           <button
                             type="button"
                             onClick={() => setTrackerMode('produced')}
-                            className={`px-3 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
+                            className={`px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
                               trackerMode === 'produced'
-                                ? 'bg-purple-600 text-white shadow-sm'
+                                ? 'bg-purple-600 text-white shadow-xs'
                                 : 'text-tertiary hover:text-primary'
                             }`}
                           >
@@ -3539,9 +4158,9 @@ export default function ProductionOrders() {
                           <button
                             type="button"
                             onClick={() => setTrackerMode('remaining')}
-                            className={`px-3 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
+                            className={`px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
                               trackerMode === 'remaining'
-                                ? 'bg-purple-600 text-white shadow-sm'
+                                ? 'bg-purple-600 text-white shadow-xs'
                                 : 'text-tertiary hover:text-primary'
                             }`}
                           >
@@ -3549,29 +4168,29 @@ export default function ProductionOrders() {
                           </button>
                         </div>
 
-                        {/* Input Style: Direct Units vs By Crates */}
-                        <div className="flex items-center bg-canvas p-1 rounded-lg border border-divider">
+                        {/* Direct vs Crates */}
+                        <div className="flex items-center bg-canvas p-1 rounded-xl border border-divider">
                           <button
                             type="button"
                             onClick={() => setTrackerInputType('direct')}
-                            className={`px-2.5 py-1 text-xs font-medium rounded-md transition-all cursor-pointer ${
+                            className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
                               trackerInputType === 'direct'
-                                ? 'bg-surface-elevated text-purple-300 font-bold shadow-sm'
+                                ? 'bg-surface-elevated text-purple-300 font-bold shadow-xs'
                                 : 'text-tertiary hover:text-primary'
                             }`}
                           >
-                            قطع مباشرة (Direct)
+                            قطع مباشرة
                           </button>
                           <button
                             type="button"
                             onClick={() => setTrackerInputType('crates')}
-                            className={`px-2.5 py-1 text-xs font-medium rounded-md transition-all cursor-pointer ${
+                            className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
                               trackerInputType === 'crates'
-                                ? 'bg-surface-elevated text-purple-300 font-bold shadow-sm'
+                                ? 'bg-surface-elevated text-purple-300 font-bold shadow-xs'
                                 : 'text-tertiary hover:text-primary'
                             }`}
                           >
-                            صناديق/أكياس (Crates)
+                            صناديق/أكياس
                           </button>
                         </div>
                       </div>
@@ -3580,7 +4199,7 @@ export default function ProductionOrders() {
 
                   {/* Input Fields Area */}
                   {!isViewer && (
-                    <div className="bg-canvas/50 p-3.5 rounded-lg border border-divider space-y-3">
+                    <div className="bg-canvas/50 p-4 rounded-xl border border-divider/60 space-y-3">
                       {trackerInputType === 'direct' ? (
                         <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-3">
                           <div className="flex-1">
@@ -3595,10 +4214,10 @@ export default function ProductionOrders() {
                                 min="0"
                                 value={trackerDirectQty}
                                 onChange={(e) => setTrackerDirectQty(e.target.value)}
-                                placeholder={`Current: ${getProducedCount(viewingOrder).toLocaleString()}`}
-                                className="w-full px-3.5 py-2 bg-surface border border-divider rounded-lg text-sm text-primary font-semibold outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 placeholder:text-tertiary/60"
+                                placeholder={`Current: ${produced.toLocaleString()}`}
+                                className="w-full px-3.5 py-2 bg-surface border border-divider rounded-xl text-sm text-primary font-bold font-mono outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
                               />
-                              <span className="absolute right-3.5 top-2 text-xs text-tertiary pointer-events-none">
+                              <span className="absolute right-3.5 top-2.5 text-xs text-tertiary pointer-events-none">
                                 {getOrderUnit(viewingOrder)}
                               </span>
                             </div>
@@ -3609,19 +4228,18 @@ export default function ProductionOrders() {
                             onClick={() => {
                               if (!trackerDirectQty.trim()) return;
                               const enteredUnits = Math.max(0, parseInt(trackerDirectQty, 10) || 0);
-
                               let targetUnits = 0;
                               if (trackerMode === 'produced') {
                                 targetUnits = enteredUnits;
                               } else {
                                 targetUnits = Math.max(0, (viewingOrder.quantity || 0) - enteredUnits);
                               }
-
                               handleApplyManualOutput(targetUnits);
                             }}
-                            className="px-5 py-2 h-[38px] bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs rounded-lg transition-all shadow-md active:scale-95 cursor-pointer whitespace-nowrap shrink-0"
+                            className="px-6 py-2 h-[42px] bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs rounded-xl transition-all shadow-md shadow-purple-600/25 active:scale-95 cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1.5"
                           >
-                            UPDATE
+                            <Check className="w-4 h-4" />
+                            <span>UPDATE OUTPUT</span>
                           </button>
                         </div>
                       ) : (
@@ -3637,7 +4255,7 @@ export default function ProductionOrders() {
                                 value={trackerCrates}
                                 onChange={(e) => setTrackerCrates(e.target.value)}
                                 placeholder="0"
-                                className="w-full px-3 py-2 bg-surface border border-divider rounded-lg text-sm text-primary font-medium outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
+                                className="w-full px-3 py-2 bg-surface border border-divider rounded-xl text-xs text-primary font-medium outline-none focus:border-purple-500 font-mono"
                               />
                             </div>
 
@@ -3651,7 +4269,7 @@ export default function ProductionOrders() {
                                 value={trackerPcsPerCrate}
                                 onChange={(e) => setTrackerPcsPerCrate(e.target.value)}
                                 placeholder={extractPcsPerCrate(viewingOrder.packagingDetails, viewingOrder.quantity)?.toString() || 'e.g. 500'}
-                                className="w-full px-3 py-2 bg-surface border border-divider rounded-lg text-sm text-primary font-medium outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
+                                className="w-full px-3 py-2 bg-surface border border-divider rounded-xl text-xs text-primary font-medium outline-none focus:border-purple-500 font-mono"
                               />
                             </div>
 
@@ -3665,13 +4283,13 @@ export default function ProductionOrders() {
                                 value={trackerLoose}
                                 onChange={(e) => setTrackerLoose(e.target.value)}
                                 placeholder="0"
-                                className="w-full px-3 py-2 bg-surface border border-divider rounded-lg text-sm text-primary font-medium outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
+                                className="w-full px-3 py-2 bg-surface border border-divider rounded-xl text-xs text-primary font-medium outline-none focus:border-purple-500 font-mono"
                               />
                             </div>
                           </div>
 
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1 border-t border-divider-subtle">
-                            <div className="text-xs text-secondary bg-surface/80 px-3 py-2 rounded-lg border border-divider-subtle">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1 border-t border-divider/60">
+                            <div className="text-xs text-secondary bg-surface px-3 py-2 rounded-xl border border-divider/60">
                               <span className="font-semibold text-primary">Live Calculation: </span>
                               {(() => {
                                 const cVal = parseInt(trackerCrates || '0', 10) || 0;
@@ -3681,11 +4299,11 @@ export default function ProductionOrders() {
                                 const resultingProduced = trackerMode === 'produced'
                                   ? totalCalculated
                                   : Math.max(0, (viewingOrder.quantity || 0) - totalCalculated);
-                                const percent = viewingOrder.quantity ? ((resultingProduced / viewingOrder.quantity) * 100).toFixed(1) : 0;
+                                const pctCalc = viewingOrder.quantity ? ((resultingProduced / viewingOrder.quantity) * 100).toFixed(1) : 0;
                                 return (
                                   <span>
-                                    ({cVal} × {pVal}) + {lVal} = <strong className="text-purple-400">{totalCalculated.toLocaleString()} pcs</strong>
-                                    {' '}➜ Set Output: <strong className="text-emerald-400">{resultingProduced.toLocaleString()} pcs ({percent}%)</strong>
+                                    ({cVal} × {pVal}) + {lVal} = <strong className="text-purple-400 font-mono">{totalCalculated.toLocaleString()} pcs</strong>
+                                    {' '}➜ Set Output: <strong className="text-emerald-400 font-mono">{resultingProduced.toLocaleString()} pcs ({pctCalc}%)</strong>
                                   </span>
                                 );
                               })()}
@@ -3697,9 +4315,7 @@ export default function ProductionOrders() {
                                 const cVal = parseInt(trackerCrates || '0', 10) || 0;
                                 const pVal = parseInt(trackerPcsPerCrate || '0', 10) || extractPcsPerCrate(viewingOrder.packagingDetails, viewingOrder.quantity) || 1;
                                 const lVal = parseInt(trackerLoose || '0', 10) || 0;
-
                                 if (cVal === 0 && lVal === 0 && !trackerCrates && !trackerLoose) return;
-
                                 const totalCalculated = (cVal * pVal) + lVal;
                                 let targetUnits = 0;
                                 if (trackerMode === 'produced') {
@@ -3707,111 +4323,129 @@ export default function ProductionOrders() {
                                 } else {
                                   targetUnits = Math.max(0, (viewingOrder.quantity || 0) - totalCalculated);
                                 }
-
                                 handleApplyManualOutput(targetUnits);
                               }}
-                              className="px-5 py-2 h-[38px] bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs rounded-lg transition-all shadow-md active:scale-95 cursor-pointer whitespace-nowrap shrink-0"
+                              className="px-6 py-2 h-[40px] bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs rounded-xl transition-all shadow-md shadow-purple-600/25 active:scale-95 cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1.5"
                             >
-                              UPDATE
+                              <Check className="w-4 h-4" />
+                              <span>APPLY CRATE COUNT</span>
                             </button>
                           </div>
                         </div>
                       )}
                     </div>
                   )}
+                </div>
 
-                  <ProductionProgressBar order={viewingOrder} />
-               </div>
-
-               <div className="grid grid-cols-2 gap-6">
-                 <div>
-                   <h4 className="text-xs font-bold text-primary uppercase tracking-wider mb-2">Properties & Materials</h4>
-                   <div className="space-y-3 p-4 border border-divider-subtle rounded-lg bg-surface">
-                     <div>
-                       <span className="text-[10px] text-tertiary block mb-0.5 font-semibold">Raw Material / Granules Blend</span>
-                       <span className="text-sm text-secondary font-medium"><bdi dir="rtl" className="block">{viewingOrder.granulesType}</bdi></span>
-                     </div>
-                     {viewingOrder.colorant && (
-                       <div>
-                         <span className="text-[10px] text-tertiary block mb-0.5 font-semibold">Color / Masterbatch</span>
-                         <span className="text-sm text-secondary font-medium"><bdi dir="rtl" className="block">{viewingOrder.colorant}</bdi></span>
-                       </div>
-                     )}
-                     <div>
-                       <span className="text-[10px] text-tertiary block mb-0.5 font-semibold">Packaging Format Details</span>
-                       <span className="text-sm text-secondary font-medium"><bdi dir="rtl" className="block">{viewingOrder.packagingDetails}</bdi></span>
-                     </div>
-
-                     {(viewingOrder.cratesQuantity || viewingOrder.looseQuantity) && (
-                       <div>
-                         <span className="text-[10px] text-tertiary block mb-0.5 font-semibold">Current Completed Breakdown</span>
-                         <span className="text-sm text-secondary font-medium block" dir="rtl">
-                           {viewingOrder.cratesQuantity && <bdi>{viewingOrder.cratesQuantity} Boxs</bdi>}
-                           {viewingOrder.cratesQuantity && viewingOrder.looseQuantity && ' + '}
-                           {viewingOrder.looseQuantity && <bdi>{viewingOrder.looseQuantity} عدد</bdi>}
-                         </span>
-                       </div>
-                     )}
-                   </div>
-                 </div>
-
-                 <div>
-                   <h4 className="text-xs font-bold text-primary uppercase tracking-wider mb-2">Scheduling & Machinery Config</h4>
-                   <div className="space-y-3 p-4 border border-divider-subtle rounded-lg bg-surface">
-                     <div>
-                       <span className="text-[10px] text-tertiary block mb-0.5 font-semibold">Assigned Machine</span>
-                       <span className="text-sm text-secondary font-semibold flex items-center gap-2">
-                         <Settings className="w-4 h-4 text-purple-500 animate-spin" />
-                         {viewingOrder.assignedMachine}
-                       </span>
-                     </div>
-                     <div>
-                       <span className="text-[10px] text-tertiary block mb-0.5 font-semibold">Production Power Estimate Method</span>
-                       <span className="text-xs text-secondary font-medium flex items-center gap-2">
-                         <Clock className="w-4 h-4 text-emerald-500" />
-                         {viewingOrder.productionRateMethod === 'hourly' 
-                           ? `${viewingOrder.hourlyRate} units / hour` 
-                           : `${viewingOrder.cycleTime}s cycle, ${viewingOrder.cavities} cavities`}
-                       </span>
-                     </div>
-                     <div>
-                       <span className="text-[10px] text-tertiary block mb-0.5 font-semibold">Target Timeline Window</span>
-                       <span className="text-xs text-secondary font-medium flex items-center gap-2">
-                         <Calendar className="w-4 h-4 text-blue-500" />
-                         {viewingOrder.startDate} to {viewingOrder.endDate}
-                       </span>
-                     </div>
-                   </div>
-                 </div>
-               </div>
-
-               {viewingOrder.notes && (
-                 <div>
-                    <h4 className="text-xs font-bold text-primary uppercase tracking-wider mb-1.5">Additional Directives & Comments</h4>
-                    <div className="p-4 bg-surface-elevated/50 rounded-lg text-sm text-secondary border border-divider-subtle whitespace-pre-wrap">
-                      <bdi dir="rtl" className="block">{viewingOrder.notes}</bdi>
+                {/* 2-Column Detailed Breakdown */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Left Column: Properties & Materials */}
+                  <div className="p-4 bg-surface-elevated/20 border border-divider/70 rounded-2xl space-y-3">
+                    <h4 className="text-xs font-bold text-primary uppercase tracking-wider flex items-center gap-1.5">
+                      <Layers className="w-3.5 h-3.5 text-blue-400" /> Formulation & Materials
+                    </h4>
+                    <div className="space-y-2.5 text-xs">
+                      <div>
+                        <span className="text-[10px] text-tertiary block font-semibold">Raw Resin / Granules</span>
+                        <span className="text-secondary font-medium"><bdi dir="rtl">{viewingOrder.granulesType}</bdi></span>
+                      </div>
+                      {viewingOrder.colorant && (
+                        <div>
+                          <span className="text-[10px] text-tertiary block font-semibold">Masterbatch / Color</span>
+                          <span className="text-secondary font-medium"><bdi dir="rtl">{viewingOrder.colorant}</bdi></span>
+                        </div>
+                      )}
+                      <div>
+                        <span className="text-[10px] text-tertiary block font-semibold">Packaging Specification</span>
+                        <span className="text-secondary font-medium"><bdi dir="rtl">{viewingOrder.packagingDetails}</bdi></span>
+                      </div>
+                      {(viewingOrder.cratesQuantity || viewingOrder.looseQuantity) && (
+                        <div>
+                          <span className="text-[10px] text-tertiary block font-semibold">Floor Crate Breakdown</span>
+                          <span className="text-secondary font-medium font-mono" dir="rtl">
+                            {viewingOrder.cratesQuantity && <bdi>{viewingOrder.cratesQuantity} Boxs</bdi>}
+                            {viewingOrder.cratesQuantity && viewingOrder.looseQuantity && ' + '}
+                            {viewingOrder.looseQuantity && <bdi>{viewingOrder.looseQuantity} Loose</bdi>}
+                          </span>
+                        </div>
+                      )}
                     </div>
-                 </div>
-               )}
-            </div>
+                  </div>
 
-            <div className="p-4 border-t border-divider flex flex-wrap justify-between items-center gap-3 bg-surface-elevated/35 font-sans">
-               <button type="button" 
+                  {/* Right Column: Machinery & Telemetry */}
+                  <div className="p-4 bg-surface-elevated/20 border border-divider/70 rounded-2xl space-y-3">
+                    <h4 className="text-xs font-bold text-primary uppercase tracking-wider flex items-center gap-1.5">
+                      <Cpu className="w-3.5 h-3.5 text-purple-400" /> Machinery & Timeline Config
+                    </h4>
+                    <div className="space-y-2.5 text-xs">
+                      <div>
+                        <span className="text-[10px] text-tertiary block font-semibold">Assigned Machine Line</span>
+                        <span className="text-secondary font-bold flex items-center gap-1.5 text-purple-300">
+                          <Settings className="w-3.5 h-3.5 text-purple-400" />
+                          {viewingOrder.assignedMachine}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-tertiary block font-semibold">Speed Calculation Parameter</span>
+                        <span className="text-secondary font-medium font-mono flex items-center gap-1.5">
+                          <Gauge className="w-3.5 h-3.5 text-emerald-400" />
+                          {viewingOrder.productionRateMethod === 'hourly'
+                            ? `${viewingOrder.hourlyRate?.toLocaleString() || 2400} bottles/hr`
+                            : `${viewingOrder.cycleTime || 12}s cycle (${viewingOrder.cavities || 1} cavities)`}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-tertiary block font-semibold">Production Timeline Window</span>
+                        <span className="text-secondary font-medium font-mono flex items-center gap-1.5">
+                          <Calendar className="w-3.5 h-3.5 text-blue-400" />
+                          {viewingOrder.startDate} ➔ {viewingOrder.endDate}
+                        </span>
+                      </div>
+                      {viewingOrder.actualStartTime && (
+                        <div>
+                          <span className="text-[10px] text-tertiary block font-semibold">Live Run Started</span>
+                          <span className="text-secondary font-medium font-mono flex items-center gap-1.5">
+                            <Clock className="w-3.5 h-3.5 text-amber-400" />
+                            {new Date(viewingOrder.actualStartTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Directives & Comments Card */}
+                {viewingOrder.notes && (
+                  <div className="p-4 bg-surface-elevated/20 border border-divider/70 rounded-2xl space-y-1.5">
+                    <h4 className="text-xs font-bold text-tertiary uppercase tracking-wider flex items-center gap-1.5">
+                      Shift Directives & Notes
+                    </h4>
+                    <p className="text-xs text-secondary leading-relaxed whitespace-pre-wrap font-sans" dir="rtl">
+                      <bdi>{viewingOrder.notes}</bdi>
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Action Toolbar Footer */}
+              <div className="p-4 border-t border-divider flex flex-wrap justify-between items-center gap-3 bg-surface-elevated/35">
+                <button type="button" 
                   onClick={() => handleDeleteOrder(viewingOrder.id)}
-                  className="px-4 py-2 bg-red-600/10 border border-red-600/20 text-red-500 rounded-lg text-xs font-semibold hover:bg-red-600 hover:text-white-fixed transition-colors flex items-center gap-2 cursor-pointer"
+                  className="px-4 py-2 bg-rose-500/10 border border-rose-500/20 text-rose-400 hover:bg-rose-500 hover:text-white rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer"
                 >
-                  <Trash2 className="w-3.5 h-3.5" /> Move to Trash Archive
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Archive to Trash</span>
                 </button>
-                <div className="flex flex-wrap items-center gap-2 font-sans">
-                  {/* Status-specific direct one-click triggers */}
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Status Action Buttons */}
                   {viewingOrder.status === 'Planned' && (
                     <button type="button"
                       onClick={() => handleStartOrder(viewingOrder.id)}
-                      className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
-                      title="Start production order now"
+                      className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl transition shadow-md shadow-emerald-600/20 flex items-center gap-1.5 cursor-pointer"
                     >
                       <PlayCircle className="w-4 h-4" />
-                      Start Production (بدء التشغيل)
+                      <span>Start Production (بدء التشغيل)</span>
                     </button>
                   )}
 
@@ -3819,19 +4453,17 @@ export default function ProductionOrders() {
                     <>
                       <button type="button"
                         onClick={() => handlePauseOrder(viewingOrder.id)}
-                        className="px-4 py-2 text-xs font-bold text-amber-300 bg-amber-600/20 border border-amber-500/40 hover:bg-amber-600 hover:text-white rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
-                        title="Pause job for machine maintenance or stoppage"
+                        className="px-4 py-2 text-xs font-bold text-amber-300 bg-amber-600/20 border border-amber-500/40 hover:bg-amber-600 hover:text-white rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs"
                       >
                         <PauseCircle className="w-4 h-4" />
-                        Pause (صيانة / توقف)
+                        <span>Pause (توقف / صيانة)</span>
                       </button>
                       <button type="button"
                         onClick={() => handleCompleteOrder(viewingOrder.id)}
-                        className="px-4 py-2 text-xs font-bold text-emerald-300 bg-emerald-600/20 border border-emerald-500/40 hover:bg-emerald-600 hover:text-white rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
-                        title="Mark order complete and transition queue"
+                        className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-md shadow-emerald-600/20"
                       >
                         <CheckCircle2 className="w-4 h-4" />
-                        {viewingOrder.isContinuous ? 'Stop & Complete (إنهاء)' : 'Complete (إتمام الطلبية)'}
+                        <span>{viewingOrder.isContinuous ? 'Stop & Complete' : 'Complete (إتمام الطلبية)'}</span>
                       </button>
                     </>
                   )}
@@ -3840,44 +4472,44 @@ export default function ProductionOrders() {
                     <>
                       <button type="button"
                         onClick={() => handleResumeOrder(viewingOrder.id)}
-                        className="px-4 py-2 text-xs font-bold text-emerald-300 bg-emerald-600/20 border border-emerald-500/40 hover:bg-emerald-600 hover:text-white rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
-                        title="Resume production run"
+                        className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-md shadow-emerald-600/20"
                       >
                         <PlayCircle className="w-4 h-4" />
-                        Resume (استئناف التشغيل)
+                        <span>Resume (استئناف التشغيل)</span>
                       </button>
                       <button type="button"
                         onClick={() => handleCompleteOrder(viewingOrder.id)}
-                        className="px-4 py-2 text-xs font-bold text-slate-300 bg-slate-700 hover:bg-slate-600 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
-                        title="Mark order complete and advance"
+                        className="px-4 py-2 text-xs font-bold text-secondary bg-surface-elevated hover:bg-surface-elevated/80 border border-divider rounded-xl transition flex items-center gap-1.5 cursor-pointer"
                       >
                         <CheckCircle2 className="w-4 h-4" />
-                        Complete Order (إنهاء)
+                        <span>Complete (إنهاء)</span>
                       </button>
                     </>
                   )}
 
                   <button type="button"
                     onClick={() => {
-                        const targetOrder = viewingOrder;
-                        setViewingOrder(null);
-                        openOrderModal(targetOrder);
+                      const targetOrder = viewingOrder;
+                      setViewingOrder(null);
+                      openOrderModal(targetOrder);
                     }}
-                    className="px-4 py-2 text-xs font-semibold text-primary bg-surface border border-divider hover:bg-surface-elevated rounded-lg transition-all cursor-pointer"
+                    className="px-4 py-2 text-xs font-semibold text-secondary hover:text-primary bg-surface hover:bg-surface-elevated border border-divider rounded-xl transition cursor-pointer"
                   >
-                    Edit Job Specifications
+                    Edit Specifications
                   </button>
+
                   <button type="button"
                     onClick={() => setViewingOrder(null)}
-                    className="px-5 py-2 text-xs font-semibold text-white bg-purple-600 hover:bg-purple-500 rounded-lg transition-all cursor-pointer"
+                    className="px-5 py-2 text-xs font-bold text-white bg-purple-600 hover:bg-purple-500 rounded-xl transition shadow-md shadow-purple-600/20 cursor-pointer"
                   >
                     Close
                   </button>
                 </div>
-             </div>
-           </div>
-         </div>
-       )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
        {/* MODAL - MACHINE SETUP REGISTRY MANAGEMENT */}
        {isMachineSetupOpen && (
