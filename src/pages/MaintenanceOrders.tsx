@@ -1579,8 +1579,7 @@ export default function MaintenanceOrders() {
             <table className="w-full border-collapse text-left text-xs">
               <thead className="sticky top-0 bg-surface/90 backdrop-blur-md z-10 shadow-xs border-b border-divider/60">
                 <tr className="text-[11px] font-semibold uppercase tracking-wider text-tertiary">
-                  <th className="px-5 py-3.5">MO ID & Date</th>
-                  <th className="px-4 py-3.5">Task & Machine</th>
+                  <th className="px-5 py-3.5">Task & Machine</th>
                   <th className="px-4 py-3.5">Issue Diagnostic</th>
                   <th className="px-4 py-3.5">Time Elapsed</th>
                   <th className="px-4 py-3.5">Priority</th>
@@ -1612,29 +1611,22 @@ export default function MaintenanceOrders() {
                         className="hover:bg-surface-elevated/40 transition-colors group cursor-pointer"
                         onClick={() => setViewingOrder(wo)}
                       >
-                        {/* ID Column */}
-                        {index === 0 && (
-                          <td rowSpan={items.length} className="px-5 py-3.5 align-top border-b border-divider/40">
-                            <span className="font-bold text-primary text-xs tracking-tight block">
-                              {wo.id}
-                            </span>
-                            <span className="text-[10px] text-tertiary mt-0.5 block">
-                              {wo.dateReported ? wo.dateReported.split('T')[0] : 'Today'}
-                            </span>
-                          </td>
-                        )}
-
                         {/* Task & Machine */}
-                        <td className="px-4 py-3.5 align-middle border-b border-divider/40">
+                        <td className="px-5 py-3.5 align-middle border-b border-divider/40">
                           <span className="font-bold text-primary block truncate max-w-xs">
                             {item ? item.name || '-' : (wo.taskName || '-')}
                           </span>
-                          {wo.machineName && (
-                            <span className="inline-flex items-center gap-1 text-[11px] text-blue-400 mt-0.5">
-                              <Wrench className="w-2.5 h-2.5" />
-                              {wo.machineName}
+                          <div className="flex items-center gap-2 mt-0.5">
+                            {wo.machineName && (
+                              <span className="inline-flex items-center gap-1 text-[11px] text-blue-400">
+                                <Wrench className="w-2.5 h-2.5" />
+                                {wo.machineName}
+                              </span>
+                            )}
+                            <span className="text-[10px] text-tertiary">
+                              {wo.machineName ? '• ' : ''}{wo.dateReported ? wo.dateReported.split('T')[0] : 'Today'}
                             </span>
-                          )}
+                          </div>
                         </td>
 
                         {/* Issue Diagnostic */}
@@ -1711,9 +1703,8 @@ export default function MaintenanceOrders() {
             <table className="w-full border-collapse text-left text-xs">
               <thead className="sticky top-0 bg-surface/90 backdrop-blur-md z-10 shadow-xs border-b border-divider/60">
                 <tr className="text-[11px] font-semibold uppercase tracking-wider text-tertiary">
-                  <th className="px-5 py-3.5">PO ID & Date</th>
-                  <th className="px-4 py-3.5">Requisition / Part</th>
-                  <th className="px-4 py-3.5">Related Machine/WO</th>
+                  <th className="px-5 py-3.5">Requisition / Part</th>
+                  <th className="px-4 py-3.5">Related Machine</th>
                   <th className="px-4 py-3.5">Time Elapsed</th>
                   <th className="px-4 py-3.5">Priority</th>
                   <th className="px-4 py-3.5">Status</th>
@@ -1743,40 +1734,38 @@ export default function MaintenanceOrders() {
                         className="hover:bg-surface-elevated/40 transition-colors group cursor-pointer" 
                         onClick={() => setViewingOrder(po)}
                       >
-                        {/* ID Column */}
-                        {index === 0 && (
-                          <td rowSpan={items.length} className="px-5 py-3.5 align-top border-b border-divider/40">
-                            <span className="font-bold text-primary text-xs tracking-tight block">
-                              {po.id}
-                            </span>
-                            <span className="text-[10px] text-tertiary mt-0.5 block">
-                              {po.dateReported ? po.dateReported.split('T')[0] : 'Today'}
-                            </span>
-                          </td>
-                        )}
-
                         {/* Part Name */}
-                        <td className="px-4 py-3.5 align-middle border-b border-divider/40">
+                        <td className="px-5 py-3.5 align-middle border-b border-divider/40">
                           <span className="font-bold text-primary block truncate max-w-xs">
                             {item ? item.name || '-' : (po.taskName || '-')}
                           </span>
-                          {item?.quantity && (
-                            <span className="text-[10px] text-tertiary mt-0.5 block">
-                              Qty: <span className="font-semibold text-secondary">{item.quantity}</span>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            {item?.quantity && (
+                              <span className="text-[10px] text-tertiary">
+                                Qty: <span className="font-semibold text-secondary">{item.quantity}</span>
+                              </span>
+                            )}
+                            <span className="text-[10px] text-tertiary">
+                              {item?.quantity ? '• ' : ''}{po.dateReported ? po.dateReported.split('T')[0] : 'Today'}
                             </span>
-                          )}
+                          </div>
                         </td>
 
-                        {/* Related Machine/WO */}
+                        {/* Related Machine */}
                         <td className="px-4 py-3.5 align-middle border-b border-divider/40 max-w-[200px]">
-                          {po.workOrderId ? (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-400">
-                              <Wrench className="w-3 h-3" />
-                              {po.workOrderId}
-                            </span>
-                          ) : (
-                            <span className="text-xs text-tertiary">Direct Requisition</span>
-                          )}
+                          {(() => {
+                            const relatedWO = workOrders.find(w => w.id === po.workOrderId);
+                            const displayName = relatedWO?.machineName || po.machineName || relatedWO?.taskName;
+                            if (displayName) {
+                              return (
+                                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-400">
+                                  <Wrench className="w-3 h-3" />
+                                  {displayName}
+                                </span>
+                              );
+                            }
+                            return <span className="text-xs text-tertiary">Direct Requisition</span>;
+                          })()}
                         </td>
 
                         {/* Time Elapsed */}
@@ -1886,7 +1875,7 @@ export default function MaintenanceOrders() {
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-primary flex items-center gap-2">
-                    {viewingOrder.id}
+                    {viewingOrder.taskName || (viewingOrder.id.startsWith('MO-') ? 'Maintenance Work Order' : 'Parts Procurement Requisition')}
                     <span className={`text-[10px] px-2 py-0.5 rounded-full border font-bold ${getStatusBadge(viewingOrder.status).color}`}>
                       {viewingOrder.status}
                     </span>
