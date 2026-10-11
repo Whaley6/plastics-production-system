@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import ExcelJS from 'exceljs';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { useAuth } from '../hooks/useAuth';
 import { useNotifications } from '../hooks/useNotifications';
-import { defaultRoles } from './Roles';
+import { Role, defaultRoles } from './Roles';
 import { logAction } from '../utils/logger';
 import { formatDistanceToNow } from 'date-fns';
 import { 
@@ -16,13 +16,24 @@ import {
   Plus, 
   Search, 
   Filter,
-  MoreVertical, Pencil, Trash2,
-  Package,
+  Pencil, 
+  Trash2,
+  Package, 
   Calendar,
-  X
+  X,
+  Download,
+  AlertTriangle,
+  Eye,
+  FileText,
+  Upload,
+  Check,
+  CheckCheck,
+  Sparkles,
+  Layers,
+  ArrowUpDown
 } from 'lucide-react';
 
-type WorkOrderItem = {
+export type WorkOrderItem = {
   dateCompleted?: string;
   id: string;
   name?: string;
@@ -35,7 +46,7 @@ type WorkOrderItem = {
   lastChecked?: string;
 };
 
-type WorkOrder = {
+export type WorkOrder = {
   dateCompleted?: string;
   id: string;
   taskName?: string;
@@ -53,7 +64,7 @@ type WorkOrder = {
   items?: WorkOrderItem[];
 };
 
-type ProcurementOrder = {
+export type ProcurementOrder = {
   dateCompleted?: string;
   id: string;
   taskName?: string;
@@ -93,572 +104,9 @@ const handleImageUploadAsync = async (files: File[]): Promise<string[]> => {
   })));
 };
 
-const MaintenanceOrderEditor = ({ initialOrder, onSave, onCancel }: { initialOrder: WorkOrder | null, onSave: (doc: WorkOrder) => void, onCancel: () => void }) => {
-  const [docId, setDocId] = useState(initialOrder?.id || '');
-  const [status, setStatus] = useState(initialOrder?.status || 'Active');
-  const [requestedBy, setRequestedBy] = useState(initialOrder?.requestedBy || initialOrder?.reportedBy || '');
-  const [assignedTo, setAssignedTo] = useState(initialOrder?.assignedTo || '');
-  const [dateReported, setDateReported] = useState(initialOrder?.dateReported || new Date().toISOString());
-  const [items, setItems] = useState<WorkOrderItem[]>(initialOrder?.items || (initialOrder ? [] : [{ id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`, name: '', description: '', quantity: '1', dateSent: new Date().toISOString(), state: 'Pending', images: [], priority: 'Low' }]));
-  const [isDraggingForm, setIsDraggingForm] = useState(false);
-  const [requestForms, setRequestForms] = useState<string[]>(initialOrder?.requestForms || []);
-
-  const handleRequestFormsUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from((e.target.files as unknown as File[]) || []);
-    const base64s = await handleImageUploadAsync(files);
-    if (base64s.length > 0) {
-      setRequestForms([...requestForms, ...base64s]);
-    }
-  };
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDraggingForm(true);
-  };
-  
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDraggingForm(false);
-  };
-
-  const handleDropForm = async (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDraggingForm(false);
-    const files = (Array.from(e.dataTransfer.files) as File[]).filter(f => f.type.startsWith('image/') || f.type === 'application/pdf');
-    const base64s = await handleImageUploadAsync(files);
-    if (base64s.length > 0) {
-      setRequestForms([...requestForms, ...base64s]);
-    }
-  };
-
-  const removeRequestForm = (index: number) => {
-    setRequestForms(requestForms.filter((_, i) => i !== index));
-  };
-
-  const handleAddItem = () => {
-    setItems([...items, { id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`, name: '', description: '', quantity: '1', dateSent: new Date().toISOString().split('T')[0], state: 'Pending', images: [], priority: 'Low' }]);
-  };
-
-  const updateItem = (id: string, field: keyof WorkOrderItem, value: any) => {
-    setItems(items.map(it => it.id === id ? { ...it, [field]: value, lastChecked: new Date().toISOString() } : it));
-  };
-
-  const removeItem = (id: string) => {
-    setItems(items.filter(it => it.id !== id));
-  };
-
-  const handleItemImages = async (id: string, e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from((e.target.files as unknown as File[]) || []);
-    const base64s = await handleImageUploadAsync(files);
-    if (base64s.length > 0) {
-      setItems(items.map(it => it.id === id ? { ...it, images: [...it.images, ...base64s] } : it));
-    }
-  };
-
-  const removeItemImage = (itemId: string, imageIndex: number) => {
-    setItems(items.map(it => it.id === itemId ? { ...it, images: it.images.filter((_, i) => i !== imageIndex) } : it));
-  };
-
-  return (
-    <div className="relative bg-surface border border-divider rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh]">
-      <div className="px-6 py-4 border-b border-divider flex justify-between items-center bg-canvas/50">
-        <h3 className="text-lg font-bold text-primary-muted flex items-center gap-2">
-          <Wrench className="w-5 h-5 text-blue-400" /> {initialOrder ? "Edit Maintenance Order" : "New Maintenance Order"}
-        </h3>
-        <button type="button" onClick={onCancel} className="text-quaternary hover:text-muted transition-colors cursor-pointer">
-          <X className="w-5 h-5" />
-        </button>
-      </div>
-      <div className="p-4 overflow-y-auto space-y-5">
-        
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-1">
-            <label className="text-xs font-semibold text-secondary">Document Number (ID)</label>
-            <input type="text" value={docId} onChange={e => setDocId(e.target.value)} className="w-full px-4 py-2 bg-canvas border border-divider rounded-lg text-sm text-primary focus:ring-2 focus:ring-blue-500 outline-none transition-all" />
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs font-semibold text-secondary">Status</label>
-            <select value={status} onChange={e => setStatus(e.target.value)} className="w-full px-4 py-2 bg-canvas border border-divider rounded-lg text-sm text-primary focus:ring-2 focus:ring-blue-500 outline-none transition-all">
-              <option value="Active">Active</option>
-              <option value="Finished">Finished</option>
-            </select>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-3 gap-4">
-          <div className="space-y-1">
-            <label className="text-xs font-semibold text-secondary">Date</label>
-            <input 
-              type="date" 
-              value={dateReported ? dateReported.split('T')[0] : ''} 
-              onChange={e => {
-                const selectedDate = e.target.value;
-                if (!selectedDate) return;
-                const now = new Date();
-                const [year, month, day] = selectedDate.split('-').map(Number);
-                const updatedDate = new Date(now);
-                updatedDate.setFullYear(year, month - 1, day);
-                setDateReported(updatedDate.toISOString());
-              }} 
-              className="w-full px-4 py-2 bg-canvas border border-divider rounded-lg text-sm text-primary focus:ring-2 focus:ring-blue-500 outline-none transition-all dark:[color-scheme:dark]" 
-            />
-          </div>
-        </div>
-
-        <div className="pt-2">
-          <div className="flex justify-between items-center mb-2">
-            <h4 className="text-sm font-bold text-primary">Order Items</h4>
-            <button type="button" onClick={handleAddItem} className="text-xs font-medium text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1 cursor-pointer">
-              <Plus className="w-3 h-3" /> Add Item
-            </button>
-          </div>
-          
-          <div className="space-y-3">
-            {items.map((item, idx) => (
-              <div key={item.id} className="p-3 border border-surface-elevated rounded-lg bg-canvas/30 space-y-3">
-                <div className="flex justify-between items-start">
-                  <h5 className="text-xs font-semibold text-quaternary uppercase tracking-wider">Item {idx + 1}</h5>
-                  <button type="button" onClick={() => removeItem(item.id)} className="text-quaternary hover:text-red-500 cursor-pointer">
-                    <Trash2 className="w-3 h-3" />
-                  </button>
-                </div>
-                <div className="grid grid-cols-12 gap-3 mb-3">
-                  <div className="col-span-12 md:col-span-8 space-y-1">
-                    <label className="text-[10px] text-muted">Item Name</label>
-                    <input type="text" value={item.name || ''} onChange={e => updateItem(item.id, 'name', e.target.value)} className="w-full px-2 py-1.5 bg-canvas border border-divider rounded-lg text-xs text-primary focus:ring-1 focus:ring-blue-500 outline-none transition-all" placeholder="e.g. Broken Lathe Spindle" />
-                  </div>
-                  <div className="col-span-12 md:col-span-4 space-y-1">
-                    <label className="text-[10px] text-muted">State</label>
-                    <select value={item.state} onChange={e => updateItem(item.id, 'state', e.target.value)} className="w-full px-2 py-1.5 bg-canvas border border-divider rounded-lg text-xs text-primary focus:ring-1 focus:ring-blue-500 outline-none transition-all">
-                      <option value="Pending">Pending</option>
-                      <option value="In Progress">In Progress</option>
-                      <option value="Completed">Completed</option>
-                      <option value="Cancelled">Cancelled</option>
-                    </select>
-                  </div>
-                </div>
-                <div className="grid grid-cols-12 gap-3">
-                  <div className="col-span-12 md:col-span-8 space-y-1">
-                    <label className="text-[10px] text-muted">Description</label>
-                    <input type="text" value={item.description} onChange={e => updateItem(item.id, 'description', e.target.value)} className="w-full px-2 py-1.5 bg-canvas border border-divider rounded-lg text-xs text-primary focus:ring-1 focus:ring-blue-500 outline-none transition-all" />
-                  </div>
-                  <div className="col-span-12 md:col-span-4 space-y-1">
-                    <label className="text-[10px] text-muted">Quantity</label>
-                    <input type="text" value={item.quantity} onChange={e => updateItem(item.id, 'quantity', e.target.value)} className="w-full px-2 py-1.5 bg-canvas border border-divider rounded-lg text-xs text-primary focus:ring-1 focus:ring-blue-500 outline-none transition-all" />
-                  </div>
-                </div>
-                <div className="grid grid-cols-12 gap-3">
-                  <div className="col-span-6 md:col-span-4 space-y-1">
-                    <label className="text-[10px] text-muted">Date Sent</label>
-                    <input 
-                      type="date" 
-                      value={item.dateSent ? item.dateSent.split('T')[0] : ''} 
-                      onChange={e => {
-                        const selectedDate = e.target.value;
-                        if (!selectedDate) return;
-                        const now = new Date();
-                        const [year, month, day] = selectedDate.split('-').map(Number);
-                        const updatedDate = new Date(now);
-                        updatedDate.setFullYear(year, month - 1, day);
-                        updateItem(item.id, 'dateSent', updatedDate.toISOString());
-                      }} 
-                      className="w-full px-2 py-1.5 bg-canvas border border-divider rounded-lg text-xs text-primary focus:ring-1 focus:ring-blue-500 outline-none transition-all dark:[color-scheme:dark]" 
-                    />
-                  </div>
-                  <div className="col-span-6 md:col-span-4 space-y-1">
-                    <label className="text-[10px] text-muted">Priority</label>
-                    <select value={item.priority} onChange={e => updateItem(item.id, 'priority', e.target.value)} className="w-full px-2 py-1.5 bg-canvas border border-divider rounded-lg text-xs text-primary focus:ring-1 focus:ring-blue-500 outline-none transition-all">
-                      <option value="Low">Low</option>
-                      <option value="Medium">Medium</option>
-                      <option value="High">High</option>
-                      <option value="Critical">Critical</option>
-                    </select>
-                  </div>
-                  <div className="col-span-12 md:col-span-4 space-y-1">
-                    <label className="text-[10px] text-muted">Images</label>
-                    <input type="file" multiple accept="image/*" onChange={(e) => handleItemImages(item.id, e)} className="w-full text-[10px] text-primary file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-[10px] file:font-semibold file:bg-surface-elevated file:text-primary hover:file:bg-surface cursor-pointer" />
-                    {item.images.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {item.images.map((img, i) => (
-                          <div key={i} className="relative group w-8 h-8 rounded-lg overflow-hidden border border-divider">
-                            <img src={img} alt={`Item attached ${i + 1}`} className="w-full h-full object-cover" />
-                            <button type="button" onClick={() => removeItemImage(item.id, i)} className="absolute top-0 right-0 bg-red-500/80 hover:bg-red-500 text-white p-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <X className="w-2 h-2" />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))}
-            {items.length === 0 && <div className="text-xs text-quaternary text-center py-4 bg-surface/20 rounded-lg border border-dashed border-divider-subtle">No items added.</div>}
-          </div>
-        </div>
-
-      </div>
-      <div className="px-6 py-4 border-t border-divider flex justify-between gap-3 bg-canvas/50">
-        <div className="flex-1">
-          <label 
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDropForm}
-            className={`flex flex-col items-center justify-center gap-1.5 px-6 py-4 bg-surface hover:bg-surface-elevated border-2 border-dashed ${isDraggingForm ? 'border-blue-500 bg-blue-500/10' : 'border-surface-strong'} text-blue-400 rounded-lg text-sm font-medium transition-colors cursor-pointer w-full text-center`}
-          >
-            <div className="flex items-center gap-2">
-              <Wrench className="w-4 h-4" />
-              <span>Drag & drop Request Forms here</span>
-            </div>
-            <span className="text-[10px] text-muted font-normal">or click to browse (PDF/Images)</span>
-            <input type="file" multiple accept="image/*,application/pdf" className="hidden" onChange={handleRequestFormsUpload} />
-          </label>
-          {requestForms.length > 0 && (
-            <div className="flex flex-wrap gap-2 mt-2">
-              {requestForms.map((form, idx) => (
-                <div key={idx} className="relative group w-10 h-10 rounded-lg border border-divider overflow-hidden">
-                  {form.startsWith('data:application/pdf') ? (
-                    <div className="w-full h-full flex items-center justify-center bg-surface-elevated text-blue-400 text-[10px] font-bold">PDF</div>
-                  ) : (
-                    <img src={form} alt={`Form ${idx + 1}`} className="w-full h-full object-cover" />
-                  )}
-                  <button type="button" onClick={() => removeRequestForm(idx)} className="absolute top-0 right-0 bg-red-500/80 hover:bg-red-500 text-white rounded-lg p-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <X className="w-3 h-3" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="flex gap-3 items-start">
-          <button type="button" onClick={onCancel} className="px-4 py-2 bg-surface hover:bg-surface-elevated border border-surface-strong text-secondary rounded-lg text-sm font-medium transition-colors cursor-pointer">Cancel</button>
-          <button type="button" onClick={() => onSave({ ...initialOrder, id: docId, status, requestedBy, assignedTo, dateReported, items, requestForms })} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white-fixed rounded-lg text-sm font-medium transition-colors cursor-pointer">
-            {initialOrder ? "Save Changes" : "Create MO"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const ProcurementOrderEditor = ({ initialOrder, workOrders, onSave, onCancel }: { initialOrder: ProcurementOrder | null, workOrders: WorkOrder[], onSave: (doc: any) => void, onCancel: () => void }) => {
-  const [docId, setDocId] = useState(initialOrder?.id || '');
-  const [status, setStatus] = useState(initialOrder?.status || 'Active');
-  const [requestedBy, setRequestedBy] = useState(initialOrder?.requestedBy || '');
-  const [assignedTo, setAssignedTo] = useState(initialOrder?.assignedTo || '');
-  const [dateReported, setDateReported] = useState(initialOrder?.dateReported || new Date().toISOString());
-  const [workOrderId, setWorkOrderId] = useState(initialOrder?.workOrderId || '');
-  
-  const [items, setItems] = useState<WorkOrderItem[]>(initialOrder?.items || (initialOrder ? [] : [{ id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`, name: '', description: '', quantity: '1', dateSent: new Date().toISOString(), state: 'Pending', images: [], priority: 'Low' }]));
-  const [isDraggingForm, setIsDraggingForm] = useState(false);
-  const [requestForms, setRequestForms] = useState<string[]>(initialOrder?.requestForms || []);
-
-  const handleRequestFormsUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from((e.target.files as unknown as File[]) || []);
-    const base64s = await handleImageUploadAsync(files);
-    if (base64s.length > 0) {
-      setRequestForms([...requestForms, ...base64s]);
-    }
-  };
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDraggingForm(true);
-  };
-  
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDraggingForm(false);
-  };
-
-  const handleDropForm = async (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDraggingForm(false);
-    const files = (Array.from(e.dataTransfer.files) as File[]).filter(f => f.type.startsWith('image/') || f.type === 'application/pdf');
-    const base64s = await handleImageUploadAsync(files);
-    if (base64s.length > 0) {
-      setRequestForms([...requestForms, ...base64s]);
-    }
-  };
-
-  const removeRequestForm = (index: number) => {
-    setRequestForms(requestForms.filter((_, i) => i !== index));
-  };
-
-  const handleAddItem = () => {
-    setItems([...items, { id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`, name: '', description: '', quantity: '1', dateSent: new Date().toISOString(), state: 'Pending', images: [], priority: 'Low' }]);
-  };
-
-  const updateItem = (id: string, field: keyof WorkOrderItem, value: any) => {
-    setItems(items.map(it => it.id === id ? { ...it, [field]: value, lastChecked: new Date().toISOString() } : it));
-  };
-
-  const removeItem = (id: string) => {
-    setItems(items.filter(it => it.id !== id));
-  };
-
-  const handleItemImages = async (id: string, e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from((e.target.files as unknown as File[]) || []);
-    const base64s = await handleImageUploadAsync(files);
-    if (base64s.length > 0) {
-      setItems(items.map(it => it.id === id ? { ...it, images: [...it.images, ...base64s] } : it));
-    }
-  };
-
-  const removeItemImage = (itemId: string, imageIndex: number) => {
-    setItems(items.map(it => it.id === itemId ? { ...it, images: it.images.filter((_, i) => i !== imageIndex) } : it));
-  };
-
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const relatedWO = workOrders.find(wo => wo.id === workOrderId);
-    onSave({
-      id: docId,
-      taskName: items.length > 0 ? items[0].name : 'Procurement Request',
-      workOrderId: workOrderId || undefined,
-      machineName: relatedWO ? relatedWO.machineName : '',
-      status,
-      requestedBy,
-      assignedTo,
-      dateReported,
-      items,
-      requestForms
-    });
-  };
-
-  return (
-    <form onSubmit={handleSubmit} className="relative bg-surface border border-divider rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
-      <div className="px-6 py-4 border-b border-divider flex justify-between items-center bg-canvas/50">
-        <h3 className="text-lg font-bold text-primary-muted flex items-center gap-2">
-          <Package className="w-5 h-5 text-blue-400" /> {initialOrder ? "Edit Part Request" : "New Part Request"}
-        </h3>
-        <button type="button" onClick={onCancel} className="text-quaternary hover:text-muted transition-colors cursor-pointer">
-          <X className="w-5 h-5" />
-        </button>
-      </div>
-      
-      <div className="p-4 overflow-y-auto space-y-5">
-        <div className="grid grid-cols-3 gap-4">
-          <div className="space-y-1">
-            <label className="text-xs font-semibold text-secondary">Document Number (ID)</label>
-            <input type="text" value={docId} onChange={e => setDocId(e.target.value)} required className="w-full px-4 py-2 bg-canvas border border-divider rounded-lg text-sm text-primary focus:ring-2 focus:ring-blue-500 outline-none transition-all" />
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs font-semibold text-secondary">Status</label>
-            <select value={status} onChange={e => setStatus(e.target.value)} required className="w-full px-4 py-2 bg-canvas border border-divider rounded-lg text-sm text-primary focus:ring-2 focus:ring-blue-500 outline-none transition-all">
-              <option value="Active">Active</option>
-              <option value="Finished">Finished</option>
-            </select>
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs font-semibold text-secondary">Related MO (Optional)</label>
-            <select value={workOrderId} onChange={e => setWorkOrderId(e.target.value)} className="w-full px-4 py-2 bg-canvas border border-divider rounded-lg text-sm text-primary focus:ring-2 focus:ring-blue-500 outline-none transition-all">
-              <option value="">None</option>
-              {workOrders.map((w) => (
-                 <option key={w.id} value={w.id}>{w.id}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-3 gap-4">
-          <div className="space-y-1">
-            <label className="text-xs font-semibold text-secondary">Date</label>
-            <input 
-              type="date" 
-              value={dateReported ? dateReported.split('T')[0] : ''} 
-              onChange={e => {
-                const selectedDate = e.target.value;
-                if (!selectedDate) return;
-                const now = new Date();
-                const [year, month, day] = selectedDate.split('-').map(Number);
-                const updatedDate = new Date(now);
-                updatedDate.setFullYear(year, month - 1, day);
-                setDateReported(updatedDate.toISOString());
-              }} 
-              required 
-              className="w-full px-4 py-2 bg-canvas border border-divider rounded-lg text-sm text-primary focus:ring-2 focus:ring-blue-500 outline-none transition-all dark:[color-scheme:dark]" 
-            />
-          </div>
-        </div>
-
-        <div className="pt-2">
-          <div className="flex justify-between items-center mb-2">
-            <h4 className="text-sm font-bold text-primary">Order Items</h4>
-            <button type="button" onClick={handleAddItem} className="text-xs font-medium text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1 cursor-pointer">
-              <Plus className="w-3 h-3" /> Add Item
-            </button>
-          </div>
-          
-          <div className="space-y-3">
-            {items.map((item, idx) => (
-              <div key={item.id} className="p-3 border border-surface-elevated rounded-lg bg-canvas/30 space-y-3">
-                <div className="flex justify-between items-start">
-                  <h5 className="text-xs font-semibold text-quaternary uppercase tracking-wider">Item {idx + 1}</h5>
-                  <button type="button" onClick={() => removeItem(item.id)} className="text-quaternary hover:text-red-500 cursor-pointer">
-                    <Trash2 className="w-3 h-3" />
-                  </button>
-                </div>
-                <div className="grid grid-cols-12 gap-3 mb-3">
-                  <div className="col-span-12 md:col-span-8 space-y-1">
-                    <label className="text-[10px] text-muted">Item Name</label>
-                    <input type="text" value={item.name || ''} onChange={e => updateItem(item.id, 'name', e.target.value)} required className="w-full px-2 py-1.5 bg-canvas border border-divider rounded-lg text-xs text-primary focus:ring-1 focus:ring-blue-500 outline-none transition-all" placeholder="e.g. Conveyor Drive Motor" />
-                  </div>
-                  <div className="col-span-12 md:col-span-4 space-y-1">
-                    <label className="text-[10px] text-muted">State</label>
-                    <select value={item.state} onChange={e => updateItem(item.id, 'state', e.target.value)} className="w-full px-2 py-1.5 bg-canvas border border-divider rounded-lg text-xs text-primary focus:ring-1 focus:ring-blue-500 outline-none transition-all">
-                      <option value="Pending">Pending</option>
-                      <option value="In Progress">In Progress</option>
-                      <option value="Completed">Completed</option>
-                      <option value="Cancelled">Cancelled</option>
-                    </select>
-                  </div>
-                </div>
-                <div className="grid grid-cols-12 gap-3">
-                  <div className="col-span-12 md:col-span-8 space-y-1">
-                    <label className="text-[10px] text-muted">Description</label>
-                    <input type="text" value={item.description} onChange={e => updateItem(item.id, 'description', e.target.value)} className="w-full px-2 py-1.5 bg-canvas border border-divider rounded-lg text-xs text-primary focus:ring-1 focus:ring-blue-500 outline-none transition-all" />
-                  </div>
-                  <div className="col-span-12 md:col-span-4 space-y-1">
-                    <label className="text-[10px] text-muted">Quantity</label>
-                    <input type="text" value={item.quantity} onChange={e => updateItem(item.id, 'quantity', e.target.value)} required className="w-full px-2 py-1.5 bg-canvas border border-divider rounded-lg text-xs text-primary focus:ring-1 focus:ring-blue-500 outline-none transition-all" />
-                  </div>
-                </div>
-                <div className="grid grid-cols-12 gap-3">
-                  <div className="col-span-6 md:col-span-4 space-y-1">
-                    <label className="text-[10px] text-muted">Date Sent</label>
-                    <input 
-                      type="date" 
-                      value={item.dateSent ? item.dateSent.split('T')[0] : ''} 
-                      onChange={e => {
-                        const selectedDate = e.target.value;
-                        if (!selectedDate) return;
-                        const now = new Date();
-                        const [year, month, day] = selectedDate.split('-').map(Number);
-                        const updatedDate = new Date(now);
-                        updatedDate.setFullYear(year, month - 1, day);
-                        updateItem(item.id, 'dateSent', updatedDate.toISOString());
-                      }} 
-                      className="w-full px-2 py-1.5 bg-canvas border border-divider rounded-lg text-xs text-primary focus:ring-1 focus:ring-blue-500 outline-none transition-all dark:[color-scheme:dark]" 
-                    />
-                  </div>
-                  <div className="col-span-6 md:col-span-4 space-y-1">
-                    <label className="text-[10px] text-muted">Priority</label>
-                    <select value={item.priority} onChange={e => updateItem(item.id, 'priority', e.target.value)} className="w-full px-2 py-1.5 bg-canvas border border-divider rounded-lg text-xs text-primary focus:ring-1 focus:ring-blue-500 outline-none transition-all">
-                      <option value="Low">Low</option>
-                      <option value="Medium">Medium</option>
-                      <option value="High">High</option>
-                      <option value="Critical">Critical</option>
-                    </select>
-                  </div>
-                  <div className="col-span-12 md:col-span-4 space-y-1">
-                    <label className="text-[10px] text-muted flex justify-between">Images</label>
-                    <div className="flex items-center gap-2">
-                      <label className="flex items-center justify-center px-2 py-1 bg-surface-elevated hover:bg-surface-strong border border-divider-subtle rounded-lg cursor-pointer transition-colors text-[10px] text-secondary font-medium w-full">
-                        Choose Files
-                        <input type="file" multiple accept="image/*" className="hidden" onChange={(e) => handleItemImages(item.id, e)} />
-                      </label>
-                      <span className="text-[10px] text-quaternary text-nowrap">{item.images.length === 0 ? 'No file chosen' : `${item.images.length} file${item.images.length>1?'s':''}`}</span>
-                    </div>
-                  </div>
-                </div>
-                {item.images.length > 0 && (
-                  <div className="flex flex-wrap gap-2 mt-2 pt-2 border-t border-divider-subtle">
-                    {item.images.map((img, i) => (
-                      <div key={i} className="relative group w-12 h-12 rounded-lg overflow-hidden border border-divider">
-                        <img src={img} alt="Preview" className="w-full h-full object-cover" />
-                        <button type="button" onClick={() => removeItemImage(item.id, i)} className="absolute inset-0 bg-red-500/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity cursor-pointer">
-                          <Trash2 className="w-4 h-4 text-white" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-
-      </div>
-      <div className="px-6 py-4 border-t border-divider flex flex-wrap lg:flex-nowrap justify-between gap-3 bg-canvas/50">
-        <div className="w-full lg:w-auto">
-          <label 
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDropForm}
-            className={`flex flex-col items-center justify-center gap-1.5 px-6 py-4 bg-surface hover:bg-surface-elevated border-2 border-dashed ${isDraggingForm ? 'border-blue-500 bg-blue-500/10' : 'border-surface-strong'} text-blue-400 rounded-lg text-sm font-medium transition-colors cursor-pointer w-full text-center`}
-          >
-            <div className="flex items-center gap-2">
-              <Package className="w-4 h-4" />
-              <span>Drag & drop Quotes/Invoices here</span>
-            </div>
-            <span className="text-[10px] text-muted font-normal">or click to browse (PDF/Images)</span>
-            <input type="file" multiple accept="image/*,application/pdf" className="hidden" onChange={handleRequestFormsUpload} />
-          </label>
-          {requestForms.length > 0 && (
-            <div className="flex flex-wrap gap-2 mt-2">
-              {requestForms.map((form, idx) => (
-                <div key={idx} className="relative group w-10 h-10 rounded-lg border border-divider overflow-hidden">
-                  {form.startsWith('data:application/pdf') ? (
-                    <div className="w-full h-full flex items-center justify-center bg-surface-elevated text-blue-400 text-[10px] font-bold">PDF</div>
-                  ) : (
-                    <img src={form} alt={`Form ${idx + 1}`} className="w-full h-full object-cover" />
-                  )}
-                  <button type="button" onClick={() => removeRequestForm(idx)} className="absolute top-0 right-0 bg-red-500/80 hover:bg-red-500 text-white rounded-lg p-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <X className="w-3 h-3" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="flex gap-3 items-end self-end w-full lg:w-auto justify-center">
-          <button type="button" onClick={onCancel} className="px-4 py-2 bg-surface hover:bg-surface-elevated border border-surface-strong text-secondary rounded-lg text-sm font-medium transition-colors cursor-pointer">Cancel</button>
-          <button type="submit" className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white-fixed rounded-lg text-sm font-medium transition-colors cursor-pointer">
-            {initialOrder ? "Save Changes" : "Create PO"}
-          </button>
-        </div>
-      </div>
-    </form>
-  );
-};
-
-const getTimeElapsed = (dateString?: string, endDateString?: string, isFinished?: boolean) => {
-  if (!dateString) return '-';
-  try {
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) return '-';
-    let diffMs = 0;
-    if (endDateString) {
-      diffMs = new Date(endDateString).getTime() - date.getTime();
-    } else if (isFinished) {
-      return 'Finished';
-    } else {
-      diffMs = Date.now() - date.getTime();
-    }
-    if (diffMs < 0) diffMs = 0;
-
-    const totalSeconds = Math.floor(diffMs / 1000);
-    const totalMinutes = Math.floor(totalSeconds / 60);
-    const minutes = totalMinutes % 60;
-    const totalHours = Math.floor(totalMinutes / 60);
-    const hours = totalHours % 24;
-    const days = Math.floor(totalHours / 24);
-
-    let parts = [];
-    if (days > 0) {
-      parts.push(`${days}d`);
-    }
-    parts.push(`${String(hours).padStart(2, '0')}h`);
-    parts.push(`${String(minutes).padStart(2, '0')}m`);
-    return parts.join(' ');
-  } catch (e) {
-    return '-';
-  }
-};
-
+// Stopwatch / Elapsed Counter
 const TimeElapsedCounter = ({ dateString, endDateString, isFinished }: { dateString?: string, endDateString?: string, isFinished?: boolean }) => {
-  const [elapsed, setElapsed] = useState('');
+  const [elapsed, setElapsed] = useState('-');
 
   useEffect(() => {
     if (!dateString) {
@@ -692,10 +140,8 @@ const TimeElapsedCounter = ({ dateString, endDateString, isFinished }: { dateStr
       const hours = totalHours % 24;
       const days = Math.floor(totalHours / 24);
 
-      let parts = [];
-      if (days > 0) {
-        parts.push(`${days}d`);
-      }
+      const parts = [];
+      if (days > 0) parts.push(`${days}d`);
       parts.push(`${String(hours).padStart(2, '0')}h`);
       parts.push(`${String(minutes).padStart(2, '0')}m`);
       parts.push(`${String(seconds).padStart(2, '0')}s`);
@@ -708,24 +154,894 @@ const TimeElapsedCounter = ({ dateString, endDateString, isFinished }: { dateStr
     return () => clearInterval(interval);
   }, [dateString, endDateString, isFinished]);
 
-  return <span className="font-mono tracking-wider tabular-nums">{elapsed}</span>;
+  return (
+    <span className="inline-flex items-center gap-1.5 font-mono tracking-wider tabular-nums px-2.5 py-1 rounded-lg bg-surface-elevated/70 border border-divider-subtle text-secondary text-xs">
+      <Clock className="w-3 h-3 text-tertiary" />
+      {elapsed}
+    </span>
+  );
+};
+
+// Form Editor for Maintenance Work Order
+const MaintenanceOrderEditor = ({ 
+  initialOrder, 
+  machinesList,
+  onSave, 
+  onCancel 
+}: { 
+  initialOrder: WorkOrder | null, 
+  machinesList: any[],
+  onSave: (doc: WorkOrder) => void, 
+  onCancel: () => void 
+}) => {
+  const [docId, setDocId] = useState(initialOrder?.id || `MO-${Math.floor(1000 + Math.random() * 9000)}`);
+  const [taskName, setTaskName] = useState(initialOrder?.taskName || '');
+  const [machineName, setMachineName] = useState(initialOrder?.machineName || '');
+  const [issue, setIssue] = useState(initialOrder?.issue || '');
+  const [priority, setPriority] = useState(initialOrder?.priority || 'Medium');
+  const [status, setStatus] = useState(initialOrder?.status || 'Active');
+  const [requestedBy, setRequestedBy] = useState(initialOrder?.requestedBy || initialOrder?.reportedBy || '');
+  const [assignedTo, setAssignedTo] = useState(initialOrder?.assignedTo || '');
+  const [dateReported, setDateReported] = useState(initialOrder?.dateReported || new Date().toISOString());
+  const [items, setItems] = useState<WorkOrderItem[]>(initialOrder?.items || (initialOrder ? [] : [{ 
+    id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`, 
+    name: '', 
+    description: '', 
+    quantity: '1', 
+    dateSent: new Date().toISOString(), 
+    state: 'Pending', 
+    images: [], 
+    priority: 'Medium' 
+  }]));
+  const [isDraggingForm, setIsDraggingForm] = useState(false);
+  const [requestForms, setRequestForms] = useState<string[]>(initialOrder?.requestForms || []);
+
+  const handleRequestFormsUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from((e.target.files as unknown as File[]) || []);
+    const base64s = await handleImageUploadAsync(files);
+    if (base64s.length > 0) {
+      setRequestForms([...requestForms, ...base64s]);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDraggingForm(true);
+  };
+  
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDraggingForm(false);
+  };
+
+  const handleDropForm = async (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDraggingForm(false);
+    const files = (Array.from(e.dataTransfer.files) as File[]).filter(f => f.type.startsWith('image/') || f.type === 'application/pdf');
+    const base64s = await handleImageUploadAsync(files);
+    if (base64s.length > 0) {
+      setRequestForms([...requestForms, ...base64s]);
+    }
+  };
+
+  const removeRequestForm = (index: number) => {
+    setRequestForms(requestForms.filter((_, i) => i !== index));
+  };
+
+  const handleAddItem = () => {
+    setItems([...items, { 
+      id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`, 
+      name: '', 
+      description: '', 
+      quantity: '1', 
+      dateSent: new Date().toISOString().split('T')[0], 
+      state: 'Pending', 
+      images: [], 
+      priority: 'Medium' 
+    }]);
+  };
+
+  const updateItem = (id: string, field: keyof WorkOrderItem, value: any) => {
+    setItems(items.map(it => it.id === id ? { ...it, [field]: value, lastChecked: new Date().toISOString() } : it));
+  };
+
+  const removeItem = (id: string) => {
+    setItems(items.filter(it => it.id !== id));
+  };
+
+  const handleItemImages = async (id: string, e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from((e.target.files as unknown as File[]) || []);
+    const base64s = await handleImageUploadAsync(files);
+    if (base64s.length > 0) {
+      setItems(items.map(it => it.id === id ? { ...it, images: [...it.images, ...base64s] } : it));
+    }
+  };
+
+  const removeItemImage = (itemId: string, imageIndex: number) => {
+    setItems(items.map(it => it.id === itemId ? { ...it, images: it.images.filter((_, i) => i !== imageIndex) } : it));
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSave({
+      ...initialOrder,
+      id: docId.trim(),
+      taskName: taskName.trim() || (items.length > 0 ? items[0].name : 'Maintenance Intervention'),
+      machineName: machineName.trim(),
+      issue: issue.trim(),
+      priority,
+      status,
+      requestedBy: requestedBy.trim(),
+      assignedTo: assignedTo.trim(),
+      dateReported,
+      items,
+      requestForms
+    });
+  };
+
+  return (
+    <div className="relative bg-surface border border-divider rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[88vh] animate-in fade-in zoom-in-95 duration-150" onClick={e => e.stopPropagation()}>
+      <div className="px-6 py-4 border-b border-divider flex justify-between items-center bg-canvas/40 shrink-0">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
+            <Wrench className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 className="text-base font-bold text-primary">
+              {initialOrder ? "Edit Maintenance Order" : "New Maintenance Work Order"}
+            </h3>
+            <p className="text-xs text-tertiary">Log breakdown details, dispatch technician, and add parts items</p>
+          </div>
+        </div>
+        <button type="button" onClick={onCancel} className="text-tertiary hover:text-primary transition-colors p-1.5 rounded-xl hover:bg-surface-elevated cursor-pointer">
+          <X className="w-5 h-5" />
+        </button>
+      </div>
+
+      <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-5 flex-1">
+        
+        {/* Core Attributes */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div>
+            <label className="block text-xs font-semibold text-secondary mb-1.5">Order ID</label>
+            <input 
+              type="text" 
+              value={docId} 
+              onChange={e => setDocId(e.target.value)} 
+              required
+              className="w-full px-3.5 py-2 bg-canvas border border-divider rounded-xl text-xs text-primary focus:border-blue-500 outline-none transition" 
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-secondary mb-1.5">Status</label>
+            <select 
+              value={status} 
+              onChange={e => setStatus(e.target.value)} 
+              className="w-full px-3.5 py-2 bg-canvas border border-divider rounded-xl text-xs text-primary focus:border-blue-500 outline-none transition"
+            >
+              <option value="Active">Active (In Progress)</option>
+              <option value="Open">Open</option>
+              <option value="Waiting for Parts">Waiting for Parts</option>
+              <option value="Finished">Finished / Completed</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-secondary mb-1.5">Priority</label>
+            <select 
+              value={priority} 
+              onChange={e => setPriority(e.target.value)} 
+              className="w-full px-3.5 py-2 bg-canvas border border-divider rounded-xl text-xs text-primary focus:border-blue-500 outline-none transition font-medium"
+            >
+              <option value="Low">Low Priority</option>
+              <option value="Medium">Medium Priority</option>
+              <option value="High">High Priority</option>
+              <option value="Critical">Critical Breakdown</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Task Name & Machine Target */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-semibold text-secondary mb-1.5">Task / Intervention Name</label>
+            <input 
+              type="text" 
+              value={taskName} 
+              onChange={e => setTaskName(e.target.value)} 
+              placeholder="e.g. Replace Lathe Spindle Bearing"
+              className="w-full px-3.5 py-2 bg-canvas border border-divider rounded-xl text-xs text-primary focus:border-blue-500 outline-none transition placeholder:text-tertiary/60" 
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-secondary mb-1.5">Affected Machine</label>
+            <div className="relative">
+              <input 
+                type="text" 
+                list="machines-list-suggestions"
+                value={machineName} 
+                onChange={e => setMachineName(e.target.value)} 
+                placeholder="e.g. Injection Molder #04"
+                className="w-full px-3.5 py-2 bg-canvas border border-divider rounded-xl text-xs text-primary focus:border-blue-500 outline-none transition placeholder:text-tertiary/60" 
+              />
+              <datalist id="machines-list-suggestions">
+                {machinesList.map((m: any, i: number) => (
+                  <option key={i} value={m.name || m.code || `Machine ${i+1}`} />
+                ))}
+              </datalist>
+            </div>
+          </div>
+        </div>
+
+        {/* Issue Description */}
+        <div>
+          <label className="block text-xs font-semibold text-secondary mb-1.5">Fault Description & Diagnostic Notes</label>
+          <textarea 
+            rows={2}
+            value={issue} 
+            onChange={e => setIssue(e.target.value)} 
+            placeholder="Describe the breakdown, error code, symptoms, or preventive maintenance checklist..."
+            className="w-full px-3.5 py-2 bg-canvas border border-divider rounded-xl text-xs text-primary focus:border-blue-500 outline-none transition placeholder:text-tertiary/60 resize-none" 
+          />
+        </div>
+
+        {/* Personnel & Date */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div>
+            <label className="block text-xs font-semibold text-secondary mb-1.5">Reported By</label>
+            <input 
+              type="text" 
+              value={requestedBy} 
+              onChange={e => setRequestedBy(e.target.value)} 
+              placeholder="Operator / Reporter"
+              className="w-full px-3.5 py-2 bg-canvas border border-divider rounded-xl text-xs text-primary focus:border-blue-500 outline-none transition placeholder:text-tertiary/60" 
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-secondary mb-1.5">Assigned Technician</label>
+            <input 
+              type="text" 
+              value={assignedTo} 
+              onChange={e => setAssignedTo(e.target.value)} 
+              placeholder="Lead Maintenance Tech"
+              className="w-full px-3.5 py-2 bg-canvas border border-divider rounded-xl text-xs text-primary focus:border-blue-500 outline-none transition placeholder:text-tertiary/60" 
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-secondary mb-1.5">Date Reported</label>
+            <input 
+              type="date" 
+              value={dateReported ? dateReported.split('T')[0] : ''} 
+              onChange={e => {
+                const selectedDate = e.target.value;
+                if (!selectedDate) return;
+                const now = new Date();
+                const [year, month, day] = selectedDate.split('-').map(Number);
+                const updatedDate = new Date(now);
+                updatedDate.setFullYear(year, month - 1, day);
+                setDateReported(updatedDate.toISOString());
+              }} 
+              className="w-full px-3.5 py-2 bg-canvas border border-divider rounded-xl text-xs text-primary focus:border-blue-500 outline-none transition dark:[color-scheme:dark]" 
+            />
+          </div>
+        </div>
+
+        {/* Dynamic Items & Action Checklist */}
+        <div className="pt-2 border-t border-divider/60">
+          <div className="flex justify-between items-center mb-3">
+            <div>
+              <h4 className="text-xs font-bold text-primary flex items-center gap-1.5">
+                <Layers className="w-3.5 h-3.5 text-blue-400" />
+                Repair Items & Checklist Tasks
+              </h4>
+              <p className="text-[11px] text-tertiary">Track specific parts, procedures, or stages</p>
+            </div>
+            <button 
+              type="button" 
+              onClick={handleAddItem} 
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 rounded-lg text-xs font-semibold transition cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" /> Add Item
+            </button>
+          </div>
+          
+          <div className="space-y-3">
+            {items.map((item, idx) => (
+              <div key={item.id} className="p-3.5 border border-divider rounded-xl bg-canvas/40 space-y-3 relative group">
+                <div className="flex justify-between items-center pb-2 border-b border-divider/40">
+                  <span className="text-[11px] font-bold text-tertiary uppercase tracking-wider">
+                    Item #{idx + 1}
+                  </span>
+                  <button 
+                    type="button" 
+                    onClick={() => removeItem(item.id)} 
+                    className="text-tertiary hover:text-rose-400 p-1 rounded-lg transition cursor-pointer"
+                    title="Remove item"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-12 gap-3">
+                  <div className="col-span-12 sm:col-span-7">
+                    <label className="block text-[10px] font-semibold text-secondary mb-1">Item / Task Name</label>
+                    <input 
+                      type="text" 
+                      value={item.name || ''} 
+                      onChange={e => updateItem(item.id, 'name', e.target.value)} 
+                      placeholder="e.g. Inspect Drive Belt & Pulley" 
+                      className="w-full px-2.5 py-1.5 bg-canvas border border-divider rounded-lg text-xs text-primary focus:border-blue-500 outline-none transition" 
+                    />
+                  </div>
+                  <div className="col-span-6 sm:col-span-3">
+                    <label className="block text-[10px] font-semibold text-secondary mb-1">State</label>
+                    <select 
+                      value={item.state} 
+                      onChange={e => updateItem(item.id, 'state', e.target.value)} 
+                      className="w-full px-2 py-1.5 bg-canvas border border-divider rounded-lg text-xs text-primary focus:border-blue-500 outline-none transition font-medium"
+                    >
+                      <option value="Pending">Pending</option>
+                      <option value="In Progress">In Progress</option>
+                      <option value="Completed">Completed</option>
+                      <option value="Cancelled">Cancelled</option>
+                    </select>
+                  </div>
+                  <div className="col-span-6 sm:col-span-2">
+                    <label className="block text-[10px] font-semibold text-secondary mb-1">Qty</label>
+                    <input 
+                      type="text" 
+                      value={item.quantity} 
+                      onChange={e => updateItem(item.id, 'quantity', e.target.value)} 
+                      className="w-full px-2 py-1.5 bg-canvas border border-divider rounded-lg text-xs text-primary focus:border-blue-500 outline-none transition text-center font-medium" 
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-12 gap-3">
+                  <div className="col-span-12 sm:col-span-8">
+                    <label className="block text-[10px] font-semibold text-secondary mb-1">Technical Notes / Specs</label>
+                    <input 
+                      type="text" 
+                      value={item.description} 
+                      onChange={e => updateItem(item.id, 'description', e.target.value)} 
+                      placeholder="e.g. Check tension and inspect for tooth shear" 
+                      className="w-full px-2.5 py-1.5 bg-canvas border border-divider rounded-lg text-xs text-primary focus:border-blue-500 outline-none transition" 
+                    />
+                  </div>
+                  <div className="col-span-12 sm:col-span-4">
+                    <label className="block text-[10px] font-semibold text-secondary mb-1">Attached Photos</label>
+                    <label className="flex items-center justify-center gap-1.5 px-2.5 py-1.5 bg-surface hover:bg-surface-elevated border border-divider rounded-lg cursor-pointer transition text-[11px] text-secondary font-medium w-full">
+                      <Upload className="w-3 h-3 text-blue-400" />
+                      <span>{item.images.length === 0 ? 'Upload Photos' : `${item.images.length} photo${item.images.length>1?'s':''}`}</span>
+                      <input type="file" multiple accept="image/*" className="hidden" onChange={(e) => handleItemImages(item.id, e)} />
+                    </label>
+                  </div>
+                </div>
+
+                {item.images.length > 0 && (
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {item.images.map((img, i) => (
+                      <div key={i} className="relative group/img w-12 h-12 rounded-lg overflow-hidden border border-divider shadow-xs">
+                        <img src={img} alt={`Item ${i + 1}`} className="w-full h-full object-cover" />
+                        <button 
+                          type="button" 
+                          onClick={() => removeItemImage(item.id, i)} 
+                          className="absolute inset-0 bg-red-600/70 opacity-0 group-hover/img:opacity-100 flex items-center justify-center transition-opacity text-white cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+
+            {items.length === 0 && (
+              <div className="text-xs text-tertiary text-center py-5 bg-surface-elevated/40 rounded-xl border border-dashed border-divider">
+                No individual checklist items added yet. Click &quot;Add Item&quot; above.
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Request Forms & Work Order Attachments */}
+        <div className="pt-2 border-t border-divider/60">
+          <label className="block text-xs font-semibold text-secondary mb-2">
+            Work Order Documents & Sign-off Forms
+          </label>
+          <label 
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDropForm}
+            className={`flex flex-col items-center justify-center gap-2 px-6 py-5 bg-canvas/60 hover:bg-surface-elevated border-2 border-dashed ${
+              isDraggingForm ? 'border-blue-500 bg-blue-500/10' : 'border-divider'
+            } text-tertiary hover:text-primary rounded-xl transition cursor-pointer text-center`}
+          >
+            <div className="w-8 h-8 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-400">
+              <Upload className="w-4 h-4" />
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-primary">Drag & drop service forms or diagnostic reports here</p>
+              <p className="text-[11px] text-tertiary mt-0.5">Supports PDF documents and high-res images</p>
+            </div>
+            <input type="file" multiple accept="image/*,application/pdf" className="hidden" onChange={handleRequestFormsUpload} />
+          </label>
+
+          {requestForms.length > 0 && (
+            <div className="flex flex-wrap gap-2.5 mt-3">
+              {requestForms.map((form, idx) => (
+                <div key={idx} className="relative group w-14 h-14 rounded-xl border border-divider overflow-hidden bg-surface shadow-xs">
+                  {form.startsWith('data:application/pdf') ? (
+                    <div className="w-full h-full flex flex-col items-center justify-center bg-blue-500/10 text-blue-400">
+                      <FileText className="w-5 h-5" />
+                      <span className="text-[9px] font-bold mt-0.5">PDF</span>
+                    </div>
+                  ) : (
+                    <img src={form} alt={`Form ${idx + 1}`} className="w-full h-full object-cover" />
+                  )}
+                  <button 
+                    type="button" 
+                    onClick={() => removeRequestForm(idx)} 
+                    className="absolute top-1 right-1 bg-red-600 text-white rounded-md p-0.5 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Modal Action Buttons */}
+        <div className="flex items-center justify-end gap-2.5 pt-4 border-t border-divider/60">
+          <button 
+            type="button" 
+            onClick={onCancel} 
+            className="px-4 py-2 rounded-xl text-xs font-medium text-tertiary hover:text-primary hover:bg-surface-elevated transition cursor-pointer"
+          >
+            Cancel
+          </button>
+          <button 
+            type="submit" 
+            className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm shadow-blue-600/20 cursor-pointer"
+          >
+            <Check className="w-4 h-4" />
+            <span>{initialOrder ? "Save Changes" : "Create Work Order"}</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+};
+
+// Form Editor for Procurement Order
+const ProcurementOrderEditor = ({ 
+  initialOrder, 
+  workOrders, 
+  onSave, 
+  onCancel 
+}: { 
+  initialOrder: ProcurementOrder | null, 
+  workOrders: WorkOrder[], 
+  onSave: (doc: any) => void, 
+  onCancel: () => void 
+}) => {
+  const [docId, setDocId] = useState(initialOrder?.id || `PO-${Math.floor(1000 + Math.random() * 9000)}`);
+  const [taskName, setTaskName] = useState(initialOrder?.taskName || '');
+  const [status, setStatus] = useState(initialOrder?.status || 'Active');
+  const [requestedBy, setRequestedBy] = useState(initialOrder?.requestedBy || '');
+  const [assignedTo, setAssignedTo] = useState(initialOrder?.assignedTo || '');
+  const [dateReported, setDateReported] = useState(initialOrder?.dateReported || new Date().toISOString());
+  const [workOrderId, setWorkOrderId] = useState(initialOrder?.workOrderId || '');
+  const [items, setItems] = useState<WorkOrderItem[]>(initialOrder?.items || (initialOrder ? [] : [{ 
+    id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`, 
+    name: '', 
+    description: '', 
+    quantity: '1', 
+    dateSent: new Date().toISOString(), 
+    state: 'Pending', 
+    images: [], 
+    priority: 'Medium' 
+  }]));
+  const [isDraggingForm, setIsDraggingForm] = useState(false);
+  const [requestForms, setRequestForms] = useState<string[]>(initialOrder?.requestForms || []);
+
+  const handleRequestFormsUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from((e.target.files as unknown as File[]) || []);
+    const base64s = await handleImageUploadAsync(files);
+    if (base64s.length > 0) {
+      setRequestForms([...requestForms, ...base64s]);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDraggingForm(true);
+  };
+  
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDraggingForm(false);
+  };
+
+  const handleDropForm = async (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDraggingForm(false);
+    const files = (Array.from(e.dataTransfer.files) as File[]).filter(f => f.type.startsWith('image/') || f.type === 'application/pdf');
+    const base64s = await handleImageUploadAsync(files);
+    if (base64s.length > 0) {
+      setRequestForms([...requestForms, ...base64s]);
+    }
+  };
+
+  const removeRequestForm = (index: number) => {
+    setRequestForms(requestForms.filter((_, i) => i !== index));
+  };
+
+  const handleAddItem = () => {
+    setItems([...items, { 
+      id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`, 
+      name: '', 
+      description: '', 
+      quantity: '1', 
+      dateSent: new Date().toISOString(), 
+      state: 'Pending', 
+      images: [], 
+      priority: 'Medium' 
+    }]);
+  };
+
+  const updateItem = (id: string, field: keyof WorkOrderItem, value: any) => {
+    setItems(items.map(it => it.id === id ? { ...it, [field]: value, lastChecked: new Date().toISOString() } : it));
+  };
+
+  const removeItem = (id: string) => {
+    setItems(items.filter(it => it.id !== id));
+  };
+
+  const handleItemImages = async (id: string, e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from((e.target.files as unknown as File[]) || []);
+    const base64s = await handleImageUploadAsync(files);
+    if (base64s.length > 0) {
+      setItems(items.map(it => it.id === id ? { ...it, images: [...it.images, ...base64s] } : it));
+    }
+  };
+
+  const removeItemImage = (itemId: string, imageIndex: number) => {
+    setItems(items.map(it => it.id === itemId ? { ...it, images: it.images.filter((_, i) => i !== imageIndex) } : it));
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const relatedWO = workOrders.find(wo => wo.id === workOrderId);
+    onSave({
+      id: docId.trim(),
+      taskName: taskName.trim() || (items.length > 0 ? items[0].name : 'Procurement Request'),
+      workOrderId: workOrderId || undefined,
+      machineName: relatedWO ? relatedWO.machineName : '',
+      status,
+      requestedBy: requestedBy.trim(),
+      assignedTo: assignedTo.trim(),
+      dateReported,
+      items,
+      requestForms
+    });
+  };
+
+  return (
+    <div className="relative bg-surface border border-divider rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[88vh] animate-in fade-in zoom-in-95 duration-150" onClick={e => e.stopPropagation()}>
+      <div className="px-6 py-4 border-b border-divider flex justify-between items-center bg-canvas/40 shrink-0">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
+            <Package className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 className="text-base font-bold text-primary">
+              {initialOrder ? "Edit Part Procurement" : "New Procurement Requisition"}
+            </h3>
+            <p className="text-xs text-tertiary">Track spare parts purchasing, vendor quotes, and order status</p>
+          </div>
+        </div>
+        <button type="button" onClick={onCancel} className="text-tertiary hover:text-primary transition-colors p-1.5 rounded-xl hover:bg-surface-elevated cursor-pointer">
+          <X className="w-5 h-5" />
+        </button>
+      </div>
+      
+      <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-5 flex-1">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div>
+            <label className="block text-xs font-semibold text-secondary mb-1.5">Document ID</label>
+            <input 
+              type="text" 
+              value={docId} 
+              onChange={e => setDocId(e.target.value)} 
+              required 
+              className="w-full px-3.5 py-2 bg-canvas border border-divider rounded-xl text-xs text-primary focus:border-blue-500 outline-none transition" 
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-secondary mb-1.5">Status</label>
+            <select 
+              value={status} 
+              onChange={e => setStatus(e.target.value)} 
+              required 
+              className="w-full px-3.5 py-2 bg-canvas border border-divider rounded-xl text-xs text-primary focus:border-blue-500 outline-none transition font-medium"
+            >
+              <option value="Active">Active (Pending/Ordered)</option>
+              <option value="Ordered">Ordered from Vendor</option>
+              <option value="In Transit">In Transit</option>
+              <option value="Finished">Finished / Received</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-secondary mb-1.5">Related Work Order</label>
+            <select 
+              value={workOrderId} 
+              onChange={e => setWorkOrderId(e.target.value)} 
+              className="w-full px-3.5 py-2 bg-canvas border border-divider rounded-xl text-xs text-primary focus:border-blue-500 outline-none transition"
+            >
+              <option value="">None (Independent Request)</option>
+              {workOrders.map((w) => (
+                <option key={w.id} value={w.id}>{w.id} - {w.taskName || w.machineName}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div>
+            <label className="block text-xs font-semibold text-secondary mb-1.5">Parts Requisition Title</label>
+            <input 
+              type="text" 
+              value={taskName} 
+              onChange={e => setTaskName(e.target.value)} 
+              placeholder="e.g. Hydraulic Seals & O-Rings Kit"
+              className="w-full px-3.5 py-2 bg-canvas border border-divider rounded-xl text-xs text-primary focus:border-blue-500 outline-none transition placeholder:text-tertiary/60" 
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-secondary mb-1.5">Requested By</label>
+            <input 
+              type="text" 
+              value={requestedBy} 
+              onChange={e => setRequestedBy(e.target.value)} 
+              placeholder="Technician Name"
+              className="w-full px-3.5 py-2 bg-canvas border border-divider rounded-xl text-xs text-primary focus:border-blue-500 outline-none transition placeholder:text-tertiary/60" 
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-secondary mb-1.5">Date Requested</label>
+            <input 
+              type="date" 
+              value={dateReported ? dateReported.split('T')[0] : ''} 
+              onChange={e => {
+                const selectedDate = e.target.value;
+                if (!selectedDate) return;
+                const now = new Date();
+                const [year, month, day] = selectedDate.split('-').map(Number);
+                const updatedDate = new Date(now);
+                updatedDate.setFullYear(year, month - 1, day);
+                setDateReported(updatedDate.toISOString());
+              }} 
+              required 
+              className="w-full px-3.5 py-2 bg-canvas border border-divider rounded-xl text-xs text-primary focus:border-blue-500 outline-none transition dark:[color-scheme:dark]" 
+            />
+          </div>
+        </div>
+
+        {/* Items List */}
+        <div className="pt-2 border-t border-divider/60">
+          <div className="flex justify-between items-center mb-3">
+            <div>
+              <h4 className="text-xs font-bold text-primary flex items-center gap-1.5">
+                <Package className="w-3.5 h-3.5 text-blue-400" />
+                Requested Spare Parts
+              </h4>
+              <p className="text-[11px] text-tertiary">Part description, quantity required, and urgency</p>
+            </div>
+            <button 
+              type="button" 
+              onClick={handleAddItem} 
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 rounded-lg text-xs font-semibold transition cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" /> Add Part
+            </button>
+          </div>
+          
+          <div className="space-y-3">
+            {items.map((item, idx) => (
+              <div key={item.id} className="p-3.5 border border-divider rounded-xl bg-canvas/40 space-y-3">
+                <div className="flex justify-between items-center pb-2 border-b border-divider/40">
+                  <span className="text-[11px] font-bold text-tertiary uppercase tracking-wider">
+                    Part #{idx + 1}
+                  </span>
+                  <button 
+                    type="button" 
+                    onClick={() => removeItem(item.id)} 
+                    className="text-tertiary hover:text-rose-400 p-1 rounded-lg transition cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-12 gap-3">
+                  <div className="col-span-12 sm:col-span-7">
+                    <label className="block text-[10px] font-semibold text-secondary mb-1">Part Name / SKU</label>
+                    <input 
+                      type="text" 
+                      value={item.name || ''} 
+                      onChange={e => updateItem(item.id, 'name', e.target.value)} 
+                      required 
+                      placeholder="e.g. Servo Motor Drive SM-200"
+                      className="w-full px-2.5 py-1.5 bg-canvas border border-divider rounded-lg text-xs text-primary focus:border-blue-500 outline-none transition" 
+                    />
+                  </div>
+                  <div className="col-span-6 sm:col-span-3">
+                    <label className="block text-[10px] font-semibold text-secondary mb-1">State</label>
+                    <select 
+                      value={item.state} 
+                      onChange={e => updateItem(item.id, 'state', e.target.value)} 
+                      className="w-full px-2 py-1.5 bg-canvas border border-divider rounded-lg text-xs text-primary focus:border-blue-500 outline-none transition font-medium"
+                    >
+                      <option value="Pending">Pending</option>
+                      <option value="In Progress">In Progress</option>
+                      <option value="Completed">Delivered / Received</option>
+                      <option value="Cancelled">Cancelled</option>
+                    </select>
+                  </div>
+                  <div className="col-span-6 sm:col-span-2">
+                    <label className="block text-[10px] font-semibold text-secondary mb-1">Qty</label>
+                    <input 
+                      type="text" 
+                      value={item.quantity} 
+                      onChange={e => updateItem(item.id, 'quantity', e.target.value)} 
+                      required 
+                      className="w-full px-2 py-1.5 bg-canvas border border-divider rounded-lg text-xs text-primary focus:border-blue-500 outline-none transition text-center font-medium" 
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-12 gap-3">
+                  <div className="col-span-12 sm:col-span-8">
+                    <label className="block text-[10px] font-semibold text-secondary mb-1">Supplier / Part Number Specs</label>
+                    <input 
+                      type="text" 
+                      value={item.description} 
+                      onChange={e => updateItem(item.id, 'description', e.target.value)} 
+                      placeholder="e.g. OEM Festo Pneumatic Valve 24V"
+                      className="w-full px-2.5 py-1.5 bg-canvas border border-divider rounded-lg text-xs text-primary focus:border-blue-500 outline-none transition" 
+                    />
+                  </div>
+                  <div className="col-span-12 sm:col-span-4">
+                    <label className="block text-[10px] font-semibold text-secondary mb-1">Part Spec Images</label>
+                    <label className="flex items-center justify-center gap-1.5 px-2.5 py-1.5 bg-surface hover:bg-surface-elevated border border-divider rounded-lg cursor-pointer transition text-[11px] text-secondary font-medium w-full">
+                      <Upload className="w-3 h-3 text-blue-400" />
+                      <span>{item.images.length === 0 ? 'Upload Photos' : `${item.images.length} photo${item.images.length>1?'s':''}`}</span>
+                      <input type="file" multiple accept="image/*" className="hidden" onChange={(e) => handleItemImages(item.id, e)} />
+                    </label>
+                  </div>
+                </div>
+
+                {item.images.length > 0 && (
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {item.images.map((img, i) => (
+                      <div key={i} className="relative group/img w-12 h-12 rounded-lg overflow-hidden border border-divider shadow-xs">
+                        <img src={img} alt={`Part ${i + 1}`} className="w-full h-full object-cover" />
+                        <button 
+                          type="button" 
+                          onClick={() => removeItemImage(item.id, i)} 
+                          className="absolute inset-0 bg-red-600/70 opacity-0 group-hover/img:opacity-100 flex items-center justify-center transition-opacity text-white cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Quotations & Invoices Upload */}
+        <div className="pt-2 border-t border-divider/60">
+          <label className="block text-xs font-semibold text-secondary mb-2">
+            Supplier Quotes, Purchase Orders & Invoices
+          </label>
+          <label 
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDropForm}
+            className={`flex flex-col items-center justify-center gap-2 px-6 py-5 bg-canvas/60 hover:bg-surface-elevated border-2 border-dashed ${
+              isDraggingForm ? 'border-blue-500 bg-blue-500/10' : 'border-divider'
+            } text-tertiary hover:text-primary rounded-xl transition cursor-pointer text-center`}
+          >
+            <div className="w-8 h-8 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-400">
+              <Upload className="w-4 h-4" />
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-primary">Drag & drop vendor quotes or receipt PDFs here</p>
+              <p className="text-[11px] text-tertiary mt-0.5">Supports PDF documents and high-resolution images</p>
+            </div>
+            <input type="file" multiple accept="image/*,application/pdf" className="hidden" onChange={handleRequestFormsUpload} />
+          </label>
+
+          {requestForms.length > 0 && (
+            <div className="flex flex-wrap gap-2.5 mt-3">
+              {requestForms.map((form, idx) => (
+                <div key={idx} className="relative group w-14 h-14 rounded-xl border border-divider overflow-hidden bg-surface shadow-xs">
+                  {form.startsWith('data:application/pdf') ? (
+                    <div className="w-full h-full flex flex-col items-center justify-center bg-blue-500/10 text-blue-400">
+                      <FileText className="w-5 h-5" />
+                      <span className="text-[9px] font-bold mt-0.5">PDF</span>
+                    </div>
+                  ) : (
+                    <img src={form} alt={`Form ${idx + 1}`} className="w-full h-full object-cover" />
+                  )}
+                  <button 
+                    type="button" 
+                    onClick={() => removeRequestForm(idx)} 
+                    className="absolute top-1 right-1 bg-red-600 text-white rounded-md p-0.5 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Modal Action Buttons */}
+        <div className="flex items-center justify-end gap-2.5 pt-4 border-t border-divider/60">
+          <button 
+            type="button" 
+            onClick={onCancel} 
+            className="px-4 py-2 rounded-xl text-xs font-medium text-tertiary hover:text-primary hover:bg-surface-elevated transition cursor-pointer"
+          >
+            Cancel
+          </button>
+          <button 
+            type="submit" 
+            className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm shadow-blue-600/20 cursor-pointer"
+          >
+            <Check className="w-4 h-4" />
+            <span>{initialOrder ? "Save Changes" : "Create Procurement Order"}</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  );
 };
 
 export default function MaintenanceOrders() {
   const { user } = useAuth();
   const { sendNotification } = useNotifications();
-  const isViewer = false;
   const [activeTab, setActiveTab] = useState<'Maintenance' | 'Procurement'>('Maintenance');
   const [workOrders, setWorkOrders] = useLocalStorage<WorkOrder[]>('maintenance_work_orders', INITIAL_MAINTENANCE_WORK_ORDERS);
   const [procurementOrders, setProcurementOrders] = useLocalStorage<ProcurementOrder[]>('maintenance_procurement_orders', INITIAL_MAINTENANCE_PROCUREMENT_ORDERS);
+  const [machinesList] = useLocalStorage<any[]>('machines_data_v2', []);
+  
   const [searchQuery, setSearchQuery] = useState('');
+  const [priorityFilter, setPriorityFilter] = useState<string>('all');
+  const [moViewStatus, setMoViewStatus] = useState<'Active' | 'Finished'>('Active');
+  
   const [isCreatingOrder, setIsCreatingOrder] = useState(false);
   const [editingOrder, setEditingOrder] = useState<WorkOrder | ProcurementOrder | null>(null);
   const [viewingOrder, setViewingOrder] = useState<WorkOrder | ProcurementOrder | null>(null);
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
-  const [moViewStatus, setMoViewStatus] = useState<'Active' | 'Finished'>('Active');
 
-  const [trash, setTrash] = useLocalStorage<any[]>('trash_data', []);
+  const [, setTrash] = useLocalStorage<any[]>('trash_data', []);
+
+  // Summary Metrics
+  const metrics = useMemo(() => {
+    const activeMO = workOrders.filter(wo => wo.status !== 'Completed' && wo.status !== 'Finished').length;
+    const criticalBreakdowns = workOrders.filter(wo => (wo.priority === 'Critical' || wo.priority === 'High') && wo.status !== 'Completed' && wo.status !== 'Finished').length;
+    const activePO = procurementOrders.filter(po => po.status === 'Active' || po.status === 'Ordered' || po.status === 'Requested').length;
+    const completedTotal = workOrders.filter(wo => wo.status === 'Completed' || wo.status === 'Finished').length +
+                           procurementOrders.filter(po => po.status === 'Completed' || po.status === 'Finished').length;
+    return { activeMO, criticalBreakdowns, activePO, completedTotal };
+  }, [workOrders, procurementOrders]);
 
   const handleDeleteWorkOrder = (id: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
@@ -742,7 +1058,7 @@ export default function MaintenanceOrders() {
       };
       setTrash(prev => [...prev, trashItem]);
       setWorkOrders(prev => prev.filter(wo => wo.id !== id));
-      logAction('Work Order Deleted', `Maintenance order ${order.id} was moved to trash. Removed: taskName: ${order.taskName}, issue: ${order.issue}, priority: ${order.priority}, status: ${order.status}`, 'warning');
+      logAction('Work Order Deleted', `Maintenance order ${order.id} was moved to trash.`, 'warning');
       if (viewingOrder?.id === id) setViewingOrder(null);
     }
   };
@@ -762,7 +1078,7 @@ export default function MaintenanceOrders() {
       };
       setTrash(prev => [...prev, trashItem]);
       setProcurementOrders(prev => prev.filter(po => po.id !== id));
-      logAction('Procurement Order Deleted', `Procurement order ${order.id} was moved to trash. Removed: taskName: ${order.taskName}, status: ${order.status}`, 'warning');
+      logAction('Procurement Order Deleted', `Procurement order ${order.id} was moved to trash.`, 'warning');
       if (viewingOrder?.id === id) setViewingOrder(null);
     }
   };
@@ -790,7 +1106,7 @@ export default function MaintenanceOrders() {
 
     sendNotification({
       title: 'Checklist Item Checked',
-      message: `${user?.name || user?.username || 'An account'} checked "${item?.name || item?.description || 'item'}" on ${wo?.machineName || wo?.id || 'work order'}.`,
+      message: `${user?.username || 'An account'} checked "${item?.name || item?.description || 'item'}" on ${wo?.machineName || wo?.id || 'work order'}.`,
       type: 'item_checked',
       priority: 'normal',
       targetUsername: 'all',
@@ -829,55 +1145,6 @@ export default function MaintenanceOrders() {
       targetUsername: 'all',
       link: 'maintenance',
       metadata: { orderId: moId, checkItemName: item?.name || item?.description, machineId: wo?.machineName }
-    });
-  };
-
-  const handleCompletePOItem = (poId: string, itemId: string) => {
-    setProcurementOrders(procurementOrders.map((po) => {
-      if (po.id === poId && po.items) {
-        const newItems = po.items.map(it => it.id === itemId ? { ...it, state: 'Completed', dateCompleted: new Date().toISOString() } : it);
-        const allCompleted = newItems.every(it => it.state === 'Completed');
-        return {
-          ...po,
-          items: newItems,
-          status: allCompleted ? 'Finished' : po.status,
-          dateCompleted: allCompleted ? (po.dateCompleted || new Date().toISOString()) : po.dateCompleted
-        };
-      }
-      return po;
-    }));
-    
-    if (viewingOrder && viewingOrder.id === poId && 'items' in viewingOrder) {
-      setViewingOrder(null);
-    }
-    
-    logAction('PO Item Completed', `Item ${itemId} in Procurement Order ${poId} marked as completed.`, 'success');
-  };
-
-  const handleCheckPO = (poId: string) => {
-    const newDate = new Date().toISOString();
-    setProcurementOrders(procurementOrders.map(po => {
-      if (po.id === poId) {
-        return { ...po, lastChecked: newDate };
-      }
-      return po;
-    }));
-    
-    if (viewingOrder && viewingOrder.id === poId) {
-      setViewingOrder({
-        ...viewingOrder,
-        lastChecked: newDate
-      } as ProcurementOrder);
-    }
-
-    sendNotification({
-      title: 'Procurement Order Checked',
-      message: `${user?.name || user?.username || 'An account'} checked procurement order ${poId}.`,
-      type: 'item_checked',
-      priority: 'normal',
-      targetUsername: 'all',
-      link: 'maintenance',
-      metadata: { orderId: poId }
     });
   };
 
@@ -923,14 +1190,7 @@ export default function MaintenanceOrders() {
       updatedPO.dateCompleted = undefined;
     }
     if (editingOrder) {
-      const changes = Object.keys(updatedPO).filter(k => {
-        const oldVal = (editingOrder as any)[k];
-        const newVal = updatedPO[k];
-        if (typeof oldVal === 'object' || typeof newVal === 'object') return false;
-        return oldVal !== newVal;
-      });
-      const changeDetails = changes.map(k => `${k}: ${(editingOrder as any)[k]} -> ${updatedPO[k]}`).join(', ');
-      logAction('Procurement Order Updated', `Procurement order ${editingOrder.id} was updated.${changeDetails ? ` Changes: ${changeDetails}` : ''}`, 'info');
+      logAction('Procurement Order Updated', `Procurement order ${editingOrder.id} was updated.`, 'info');
       setProcurementOrders(procurementOrders.map(po => po.id === editingOrder.id ? updatedPO as ProcurementOrder : po));
       sendNotification({
         title: 'Procurement Order Updated',
@@ -942,12 +1202,11 @@ export default function MaintenanceOrders() {
         metadata: { orderId: editingOrder.id }
       });
     } else {
-      const detailsArray = Object.entries(updatedPO).filter(([k,v]) => v !== undefined && k !== 'id').map(([k,v]) => `${k}: ${v}`).join(', ');
-      logAction('Procurement Order Created', `Procurement order ${updatedPO.id} was created. Added: ${detailsArray}`, 'success');
+      logAction('Procurement Order Created', `Procurement order ${updatedPO.id} was created.`, 'success');
       setProcurementOrders([updatedPO as ProcurementOrder, ...procurementOrders]);
       sendNotification({
         title: 'New Procurement Request Added',
-        message: `Parts request for ${updatedPO.taskName || updatedPO.sparePart || 'item'} (${updatedPO.priority || 'Normal'} Priority).`,
+        message: `Parts request for ${updatedPO.taskName || 'item'} (${updatedPO.priority || 'Normal'} Priority).`,
         type: 'order_created',
         priority: updatedPO.priority === 'Critical' ? 'urgent' : updatedPO.priority === 'High' ? 'high' : 'normal',
         targetUsername: 'all',
@@ -959,27 +1218,53 @@ export default function MaintenanceOrders() {
     setEditingOrder(null);
   };
 
-  const getPriorityColor = (priority: string) => {
+  const getPriorityBadge = (priority: string) => {
     switch (priority) {
-      case 'Critical': return 'text-red-500 bg-red-500/10 border-red-500/20';
-      case 'High': return 'text-orange-500 bg-orange-500/10 border-orange-500/20';
-      case 'Medium': return 'text-amber-500 bg-amber-500/10 border-amber-500/20';
-      case 'Low': return 'text-green-500 bg-green-500/10 border-green-500/20';
-      default: return 'text-muted bg-surface-elevated border-surface-strong';
+      case 'Critical':
+        return 'text-rose-400 bg-rose-500/10 border-rose-500/30';
+      case 'High':
+        return 'text-amber-400 bg-amber-500/10 border-amber-500/30';
+      case 'Medium':
+        return 'text-blue-400 bg-blue-500/10 border-blue-500/30';
+      case 'Low':
+        return 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30';
+      default:
+        return 'text-tertiary bg-surface-elevated border-divider';
     }
   };
 
-  const getStatusColor = (status: string) => {
+  const getStatusBadge = (status: string) => {
     switch (status) {
       case 'Completed':
-      case 'Delivered': return 'text-emerald-500';
+      case 'Delivered':
+      case 'Finished':
+        return {
+          color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
+          icon: CheckCircle2
+        };
       case 'In Progress':
-      case 'In Transit': return 'text-blue-500';
+      case 'In Transit':
+        return {
+          color: 'text-blue-400 bg-blue-500/10 border-blue-500/20',
+          icon: Truck
+        };
       case 'Waiting for Parts':
-      case 'Ordered': return 'text-amber-500';
+      case 'Ordered':
+        return {
+          color: 'text-amber-400 bg-amber-500/10 border-amber-500/20',
+          icon: Clock
+        };
       case 'Requested':
-      case 'Open': return 'text-red-500';
-      default: return 'text-muted';
+      case 'Open':
+        return {
+          color: 'text-rose-400 bg-rose-500/10 border-rose-500/20',
+          icon: AlertCircle
+        };
+      default:
+        return {
+          color: 'text-secondary bg-surface-elevated border-divider',
+          icon: Wrench
+        };
     }
   };
 
@@ -987,9 +1272,8 @@ export default function MaintenanceOrders() {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet(`${activeTab} Report`);
 
-    let currentRow = 2; // Starts at row 2, after the header
+    let currentRow = 2;
 
-    // Define columns
     if (activeTab === 'Maintenance') {
       worksheet.columns = [
         { header: 'MO ID', key: 'id', width: 15 },
@@ -1027,7 +1311,7 @@ export default function MaintenanceOrders() {
             id: index === 0 ? wo.id : '',
             taskName: item ? item.name || '-' : wo.taskName,
             issue: item ? item.description || '-' : wo.issue,
-            timeElapsed: getTimeElapsed(item ? item.dateSent : wo.dateReported, item ? item.dateCompleted : wo.dateCompleted, item ? item.state === 'Completed' : (wo.status === 'Completed' || wo.status === 'Finished')),
+            timeElapsed: (item ? item.dateSent : wo.dateReported) || '-',
             priority: item ? item.priority || wo.priority : wo.priority,
             status: index === 0 ? wo.status : '',
             dateReported: index === 0 ? wo.dateReported : ''
@@ -1077,7 +1361,7 @@ export default function MaintenanceOrders() {
             id: index === 0 ? po.id : '',
             taskName: item ? item.name || '-' : po.taskName,
             issue: item ? item.description || '-' : '-',
-            timeElapsed: getTimeElapsed(item ? item.dateSent : po.dateReported, item ? item.dateCompleted : po.dateCompleted, item ? item.state === 'Completed' : (po.status === 'Completed' || po.status === 'Finished')),
+            timeElapsed: (item ? item.dateSent : po.dateReported) || '-',
             priority: item ? item.priority || 'Low' : 'Low',
             status: index === 0 ? po.status : '',
             dateReported: index === 0 ? po.dateReported : ''
@@ -1099,30 +1383,9 @@ export default function MaintenanceOrders() {
       cell.fill = {
         type: 'pattern',
         pattern: 'solid',
-        fgColor: { argb: 'FF1F2937' } // dark gray
+        fgColor: { argb: 'FF1F2937' }
       };
       cell.alignment = { vertical: 'middle', horizontal: 'center' };
-      cell.border = {
-        top: { style: 'thin' },
-        left: { style: 'thin' },
-        bottom: { style: 'thin' },
-        right: { style: 'thin' }
-      };
-    });
-
-    // Style all cells
-    worksheet.eachRow((row, rowNumber) => {
-      if (rowNumber > 1) { // Skip header
-        row.eachCell((cell) => {
-          cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
-          cell.border = {
-            top: { style: 'thin', color: { argb: 'FF000000' } },
-            left: { style: 'thin', color: { argb: 'FF000000' } },
-            bottom: { style: 'thin', color: { argb: 'FF000000' } },
-            right: { style: 'thin', color: { argb: 'FF000000' } }
-          };
-        });
-      }
     });
 
     const buffer = await workbook.xlsx.writeBuffer();
@@ -1137,127 +1400,253 @@ export default function MaintenanceOrders() {
     logAction('Report Exported', `User exported ${activeTab} report`, 'info');
   };
 
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'Completed':
-      case 'Delivered': return <CheckCircle2 className="w-4 h-4" />;
-      case 'In Progress':
-      case 'In Transit': return <Truck className="w-4 h-4" />;
-      case 'Waiting for Parts':
-      case 'Ordered': return <Clock className="w-4 h-4" />;
-      case 'Requested':
-      case 'Open': return <AlertCircle className="w-4 h-4" />;
-      default: return <Wrench className="w-4 h-4" />;
-    }
-  };
+  // Filtered maintenance list
+  const filteredWorkOrders = useMemo(() => {
+    return workOrders.filter(wo => {
+      const sq = searchQuery.trim().toLowerCase();
+      const matchesSearch = !sq || 
+        wo.id.toLowerCase().includes(sq) || 
+        (wo.taskName || '').toLowerCase().includes(sq) ||
+        (wo.machineName || '').toLowerCase().includes(sq) ||
+        (wo.issue || '').toLowerCase().includes(sq) ||
+        (wo.items && wo.items.some(item => (item.name || '').toLowerCase().includes(sq)));
+
+      const matchesPriority = priorityFilter === 'all' || wo.priority === priorityFilter;
+
+      return matchesSearch && matchesPriority;
+    });
+  }, [workOrders, searchQuery, priorityFilter]);
+
+  // Filtered procurement list
+  const filteredProcurementOrders = useMemo(() => {
+    return procurementOrders.filter(po => {
+      const sq = searchQuery.trim().toLowerCase();
+      const matchesSearch = !sq || 
+        po.id.toLowerCase().includes(sq) || 
+        (po.taskName || '').toLowerCase().includes(sq) || 
+        (po.workOrderId || '').toLowerCase().includes(sq) ||
+        (po.items && po.items.some(item => (item.name || '').toLowerCase().includes(sq)));
+
+      return matchesSearch;
+    });
+  }, [procurementOrders, searchQuery]);
 
   return (
-    <div className="h-full flex flex-col space-y-4">
-      <div className="flex justify-between items-end border-b border-divider pb-4 shrink-0">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight text-primary">Maintenance & Procurement</h2>
-          <p className="mt-2 text-sm text-tertiary">
-            Track machine maintenance orders and essential parts procurement.
-          </p>
+    <div className="w-full h-full flex flex-col gap-5 max-w-7xl mx-auto">
+      {/* Top Hero Banner */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 shrink-0 pb-4 border-b border-divider/60">
+        <div className="flex items-center gap-3.5">
+          <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-amber-500/20 to-orange-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 shadow-sm">
+            <Wrench className="w-5 h-5" />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold tracking-tight text-primary flex items-center gap-2">
+              Maintenance & Procurement Hub
+              <span className="text-[10px] font-semibold tracking-wide uppercase px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400">
+                CMMS & Tooling
+              </span>
+            </h2>
+            <p className="text-xs text-tertiary mt-0.5">
+              Track machine work orders, parts procurement, and technician dispatch checklists.
+            </p>
+          </div>
         </div>
-        <div className="flex gap-3">
-          <button type="button" onClick={handleExport} className="flex items-center gap-2 px-4 py-2 bg-surface border border-surface-elevated disabled:opacity-50 rounded-lg text-xs font-medium text-secondary hover:bg-surface-elevated transition-colors shadow-sm cursor-pointer">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg> Export Report
+
+        <div className="flex items-center gap-2.5">
+          <button 
+            type="button" 
+            onClick={handleExport} 
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-surface hover:bg-surface-elevated border border-divider text-secondary hover:text-primary rounded-xl text-xs font-semibold transition shadow-xs cursor-pointer"
+          >
+            <Download className="w-4 h-4 text-tertiary" />
+            <span>Export Excel</span>
           </button>
-          {!isViewer && (
-            <button type="button" 
-              onClick={() => setIsCreatingOrder(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 border border-blue-500 rounded-lg text-xs font-medium text-white-fixed hover:bg-blue-500 transition-colors shadow-sm cursor-pointer"
-            >
-              <Plus className="w-4 h-4" /> 
-              {activeTab === 'Maintenance' ? 'New Maintenance Order' : 'New Part Request'}
-            </button>
-          )}
+
+          <button 
+            type="button" 
+            onClick={() => setIsCreatingOrder(true)}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold transition-all shadow-sm shadow-blue-600/20 cursor-pointer"
+          >
+            <Plus className="w-4 h-4" /> 
+            <span>{activeTab === 'Maintenance' ? 'New Work Order' : 'New Part Request'}</span>
+          </button>
         </div>
       </div>
 
-      <div className="bg-canvas/50 rounded-lg shadow-sm border border-divider-subtle overflow-hidden flex-1 flex flex-col min-h-0">
-        <div className="flex justify-between items-center border-b border-divider-subtle px-4 bg-surface/20 shrink-0">
-          <div className="flex gap-6">
-            <button type="button" 
+      {/* KPI Overview Metrics Bar */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5 shrink-0">
+        <div className="bg-surface border border-divider/70 rounded-2xl p-4 flex items-center gap-3.5 shadow-xs">
+          <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shrink-0">
+            <Wrench className="w-5 h-5" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-[11px] font-medium text-tertiary uppercase tracking-wider">Active Work Orders</p>
+            <p className="text-lg font-bold text-amber-400 tracking-tight mt-0.5">{metrics.activeMO}</p>
+          </div>
+        </div>
+
+        <div className="bg-surface border border-divider/70 rounded-2xl p-4 flex items-center gap-3.5 shadow-xs">
+          <div className="w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400 shrink-0">
+            <AlertTriangle className="w-5 h-5" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-[11px] font-medium text-tertiary uppercase tracking-wider">Urgent Breakdowns</p>
+            <p className="text-lg font-bold text-rose-400 tracking-tight mt-0.5">{metrics.criticalBreakdowns}</p>
+          </div>
+        </div>
+
+        <div className="bg-surface border border-divider/70 rounded-2xl p-4 flex items-center gap-3.5 shadow-xs">
+          <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 shrink-0">
+            <Package className="w-5 h-5" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-[11px] font-medium text-tertiary uppercase tracking-wider">Parts Requisitions</p>
+            <p className="text-lg font-bold text-blue-400 tracking-tight mt-0.5">{metrics.activePO}</p>
+          </div>
+        </div>
+
+        <div className="bg-surface border border-divider/70 rounded-2xl p-4 flex items-center gap-3.5 shadow-xs">
+          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
+            <CheckCircle2 className="w-5 h-5" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-[11px] font-medium text-tertiary uppercase tracking-wider">Resolved Interventions</p>
+            <p className="text-lg font-bold text-emerald-400 tracking-tight mt-0.5">{metrics.completedTotal}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Container */}
+      <div className="bg-surface border border-divider/70 rounded-2xl shadow-sm flex-1 flex flex-col min-h-0 overflow-hidden">
+        
+        {/* Navigation & Toolbar Header */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3.5 px-5 py-3.5 border-b border-divider/60 bg-surface-elevated/20 shrink-0">
+          
+          {/* Main Segmented Tab Switcher */}
+          <div className="flex items-center gap-2">
+            <button 
+              type="button" 
               onClick={() => setActiveTab('Maintenance')}
-              className={`py-4 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
                 activeTab === 'Maintenance' 
-                  ? 'border-blue-500 text-blue-500' 
-                  : 'border-transparent text-secondary hover:text-primary'
+                  ? 'bg-blue-600 text-white shadow-xs shadow-blue-600/30' 
+                  : 'bg-surface-elevated/80 hover:bg-surface-elevated text-secondary hover:text-primary border border-divider-subtle'
               }`}
             >
-              <Wrench className="w-4 h-4" /> Maintenance Orders
+              <Wrench className="w-3.5 h-3.5" />
+              <span>Maintenance Orders</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${activeTab === 'Maintenance' ? 'bg-white/20 text-white' : 'bg-surface text-tertiary'}`}>
+                {workOrders.length}
+              </span>
             </button>
-            <button type="button" 
+
+            <button 
+              type="button" 
               onClick={() => setActiveTab('Procurement')}
-              className={`py-4 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
                 activeTab === 'Procurement' 
-                  ? 'border-blue-500 text-blue-500' 
-                  : 'border-transparent text-secondary hover:text-primary'
+                  ? 'bg-blue-600 text-white shadow-xs shadow-blue-600/30' 
+                  : 'bg-surface-elevated/80 hover:bg-surface-elevated text-secondary hover:text-primary border border-divider-subtle'
               }`}
             >
-              <Package className="w-4 h-4" /> Procurement
+              <Package className="w-3.5 h-3.5" />
+              <span>Procurement Requests</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${activeTab === 'Procurement' ? 'bg-white/20 text-white' : 'bg-surface text-tertiary'}`}>
+                {procurementOrders.length}
+              </span>
             </button>
           </div>
           
-          <div className="flex items-center gap-4">
-            <div className="flex bg-surface-elevated rounded-lg p-1">
-              <button type="button"
+          {/* Filters and Search Toolbar */}
+          <div className="flex items-center gap-2.5 flex-wrap">
+            {/* Status Switch (Active vs Finished) */}
+            <div className="flex bg-canvas border border-divider-subtle rounded-xl p-1 shrink-0">
+              <button 
+                type="button"
                 onClick={() => setMoViewStatus('Active')}
-                className={`px-3 py-1 text-xs font-semibold rounded-lg transition-colors ${moViewStatus === 'Active' ? 'bg-surface text-primary shadow-sm' : 'text-quinary hover:text-secondary'}`}
+                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  moViewStatus === 'Active' 
+                    ? 'bg-surface text-primary shadow-xs' 
+                    : 'text-tertiary hover:text-secondary'
+                }`}
               >
                 Active
               </button>
-              <button type="button"
+              <button 
+                type="button"
                 onClick={() => setMoViewStatus('Finished')}
-                className={`px-3 py-1 text-xs font-semibold rounded-lg transition-colors ${moViewStatus === 'Finished' ? 'bg-surface text-primary shadow-sm' : 'text-quinary hover:text-secondary'}`}
+                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  moViewStatus === 'Finished' 
+                    ? 'bg-surface text-primary shadow-xs' 
+                    : 'text-tertiary hover:text-secondary'
+                }`}
               >
                 Finished
               </button>
             </div>
-            <div className="relative w-64">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-quaternary" />
+
+            {/* Priority Filter (Maintenance Tab) */}
+            {activeTab === 'Maintenance' && (
+              <div className="flex items-center gap-1 shrink-0">
+                <select
+                  value={priorityFilter}
+                  onChange={e => setPriorityFilter(e.target.value)}
+                  className="px-2.5 py-1.5 bg-canvas border border-divider rounded-xl text-xs text-secondary font-medium outline-none focus:border-blue-500 transition"
+                >
+                  <option value="all">All Priorities</option>
+                  <option value="Critical">Critical</option>
+                  <option value="High">High</option>
+                  <option value="Medium">Medium</option>
+                  <option value="Low">Low</option>
+                </select>
+              </div>
+            )}
+
+            {/* Search Input */}
+            <div className="relative w-full sm:w-56">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-tertiary pointer-events-none" />
               <input 
                 type="text" 
                 placeholder={`Search ${activeTab.toLowerCase()}...`}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-4 py-1.5 bg-canvas border border-divider rounded-lg text-xs focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all text-secondary placeholder:text-quinary"
-            />
-          </div>
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-7 py-1.5 bg-canvas border border-divider rounded-xl text-xs text-primary focus:border-blue-500 outline-none transition placeholder:text-tertiary/60"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-tertiary hover:text-primary p-0.5"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
-        <div className="flex-1 overflow-auto bg-surface/30">
+        {/* Orders Table Container */}
+        <div className="flex-1 overflow-auto">
           {activeTab === 'Maintenance' ? (
-            <table className="w-full border-collapse">
-              <thead className="sticky top-0 bg-surface/80 backdrop-blur-md z-10 shadow-sm">
-                <tr className="border-b border-divider text-[11px] uppercase tracking-widest text-quaternary">
-                  <th className="text-center px-6 py-4 font-semibold">MO ID</th>
-                  <th className="text-center px-6 py-4 font-semibold">Task Name</th>
-                  <th className="text-center px-6 py-4 font-semibold">Issue Description</th>
-                  <th className="text-center px-6 py-4 font-semibold">Time Elapsed</th>
-                  <th className="text-center px-6 py-4 font-semibold">Priority</th>
-                  <th className="text-center px-6 py-4 font-semibold">Status</th>
-                  <th className="text-center px-6 py-4 font-semibold">Actions</th>
+            <table className="w-full border-collapse text-left text-xs">
+              <thead className="sticky top-0 bg-surface/90 backdrop-blur-md z-10 shadow-xs border-b border-divider/60">
+                <tr className="text-[11px] font-semibold uppercase tracking-wider text-tertiary">
+                  <th className="px-5 py-3.5">MO ID & Date</th>
+                  <th className="px-4 py-3.5">Task & Machine</th>
+                  <th className="px-4 py-3.5">Issue Diagnostic</th>
+                  <th className="px-4 py-3.5">Time Elapsed</th>
+                  <th className="px-4 py-3.5">Priority</th>
+                  <th className="px-4 py-3.5">Status</th>
+                  <th className="px-5 py-3.5 text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-divider-subtle">
-                {workOrders.filter(wo => {
-                  if (!searchQuery) return true;
-                  const sq = searchQuery.toLowerCase();
-                  return wo.id.toLowerCase().includes(sq) || 
-                         (wo.taskName || '').toLowerCase().includes(sq) ||
-                         (wo.items && wo.items.some(item => (item.name || '').toLowerCase().includes(sq)));
-                }).flatMap((wo) => {
+              <tbody className="divide-y divide-divider/40">
+                {filteredWorkOrders.flatMap((wo) => {
                   let items = wo.items && wo.items.length > 0 ? wo.items : [null];
                   
-                  // Filter items based on current view status
                   if (wo.items && wo.items.length > 0) {
                      items = items.filter(it => moViewStatus === 'Finished' ? it?.state === 'Completed' : it?.state !== 'Completed');
                   } else {
-                     // For orders without items, use the order status
                      const isFinished = wo.status === 'Completed' || wo.status === 'Finished';
                      const matchesStatus = moViewStatus === 'Finished' ? isFinished : !isFinished;
                      if (!matchesStatus) items = [];
@@ -1265,82 +1654,126 @@ export default function MaintenanceOrders() {
                   
                   if (items.length === 0) return [];
                   
-                  return items.map((item, index) => (
-                    <tr key={`${wo.id}-${item ? item.id : 'base'}`} className={`hover:bg-surface/50 transition-colors group cursor-pointer ${index === 0 ? '' : 'border-t-0'}`} onClick={() => setViewingOrder(wo)}>
-                      {index === 0 && (
-                        <td rowSpan={items.length} className="text-center px-6 py-4 whitespace-nowrap text-sm font-medium text-primary align-middle border-b border-divider-subtle">
-                          {wo.id}
-                          <div className="text-[10px] text-quaternary font-normal mt-0.5">{wo.dateReported}</div>
+                  return items.map((item, index) => {
+                    const statusObj = getStatusBadge(wo.status);
+                    const itemPriority = item?.priority || wo.priority || 'Low';
+
+                    return (
+                      <tr 
+                        key={`${wo.id}-${item ? item.id : 'base'}`} 
+                        className="hover:bg-surface-elevated/40 transition-colors group cursor-pointer"
+                        onClick={() => setViewingOrder(wo)}
+                      >
+                        {/* ID Column */}
+                        {index === 0 && (
+                          <td rowSpan={items.length} className="px-5 py-3.5 align-top border-b border-divider/40">
+                            <span className="font-bold text-primary text-xs tracking-tight block">
+                              {wo.id}
+                            </span>
+                            <span className="text-[10px] text-tertiary mt-0.5 block">
+                              {wo.dateReported ? wo.dateReported.split('T')[0] : 'Today'}
+                            </span>
+                          </td>
+                        )}
+
+                        {/* Task & Machine */}
+                        <td className="px-4 py-3.5 align-middle border-b border-divider/40">
+                          <span className="font-bold text-primary block truncate max-w-xs">
+                            {item ? item.name || '-' : (wo.taskName || '-')}
+                          </span>
+                          {wo.machineName && (
+                            <span className="inline-flex items-center gap-1 text-[11px] text-blue-400 mt-0.5">
+                              <Wrench className="w-2.5 h-2.5" />
+                              {wo.machineName}
+                            </span>
+                          )}
                         </td>
-                      )}
-                      <td className="text-center px-6 py-4 text-sm text-secondary align-middle border-b border-divider-subtle border-dashed">
-                        <bdi dir="auto">{item ? item.name || '-' : (wo.taskName || '-')}</bdi>
-                      </td>
-                      <td className="text-center px-6 py-4 text-sm text-muted max-w-xs align-middle border-b border-divider-subtle border-dashed">
-                        <div className="truncate max-w-xs" title={item ? item.description : wo.issue}>
-                          <bdi dir="auto">{item ? item.description || '-' : (wo.issue || '-')}</bdi>
-                        </div>
-                      </td>
-                      <td className="text-center px-6 py-4 whitespace-nowrap text-xs text-secondary font-mono align-middle border-b border-divider-subtle border-dashed">
-                        <TimeElapsedCounter dateString={item ? item.dateSent : wo.dateReported} endDateString={item ? item.dateCompleted : wo.dateCompleted} isFinished={item ? item.state === 'Completed' : (wo.status === 'Completed' || wo.status === 'Finished')} />
-                      </td>
-                      <td className="text-center px-6 py-4 whitespace-nowrap align-middle border-b border-divider-subtle border-dashed">
-                        <span className={`inline-flex items-center px-1.5 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider border ${getPriorityColor(item ? (item.priority || 'Low') : (wo.priority || 'Low'))}`}>
-                          {item ? (item.priority || 'Low') : (wo.priority || 'Low')}
-                        </span>
-                      </td>
-                      {index === 0 && (
-                        <>
-                          <td rowSpan={items.length} className="text-center px-6 py-4 whitespace-nowrap align-middle border-b border-divider-subtle">
-                            <div className={`flex items-center justify-center gap-1.5 text-xs font-medium ${getStatusColor(wo.status)}`}>
-                              {getStatusIcon(wo.status)}
-                              {wo.status}
-                            </div>
-                          </td>
-                          <td rowSpan={items.length} className="text-center px-6 py-4 whitespace-nowrap text-sm font-medium align-middle border-b border-divider-subtle">
-                            <div className="flex justify-center gap-1">
-                              <button type="button" 
-                                onClick={(e) => { e.stopPropagation(); setEditingOrder(wo); }}
-                                className="text-tertiary hover:text-primary transition-colors p-1.5 rounded-lg hover:bg-surface-elevated"
-                              >
-                                <Pencil className="w-4 h-4" />
-                              </button>
-                              <button type="button" 
-                                onClick={(e) => handleDeleteWorkOrder(wo.id, e)}
-                                className="text-tertiary hover:text-red-500 transition-colors p-1.5 rounded-lg hover:bg-red-500/10"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </td>
-                        </>
-                      )}
-                    </tr>
-                  ));
+
+                        {/* Issue Diagnostic */}
+                        <td className="px-4 py-3.5 align-middle text-secondary border-b border-divider/40 max-w-xs">
+                          <p className="truncate text-xs text-secondary" title={item ? item.description : wo.issue}>
+                            {item ? item.description || '-' : (wo.issue || '-')}
+                          </p>
+                        </td>
+
+                        {/* Time Elapsed */}
+                        <td className="px-4 py-3.5 align-middle whitespace-nowrap border-b border-divider/40">
+                          <TimeElapsedCounter 
+                            dateString={item ? item.dateSent : wo.dateReported} 
+                            endDateString={item ? item.dateCompleted : wo.dateCompleted} 
+                            isFinished={item ? item.state === 'Completed' : (wo.status === 'Completed' || wo.status === 'Finished')} 
+                          />
+                        </td>
+
+                        {/* Priority Badge */}
+                        <td className="px-4 py-3.5 align-middle whitespace-nowrap border-b border-divider/40">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider border ${getPriorityBadge(itemPriority)}`}>
+                            {itemPriority}
+                          </span>
+                        </td>
+
+                        {/* Status Column */}
+                        {index === 0 && (
+                          <>
+                            <td rowSpan={items.length} className="px-4 py-3.5 align-top whitespace-nowrap border-b border-divider/40">
+                              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border ${statusObj.color}`}>
+                                <statusObj.icon className="w-3.5 h-3.5" />
+                                {wo.status}
+                              </span>
+                            </td>
+
+                            {/* Actions Column */}
+                            <td rowSpan={items.length} className="px-5 py-3.5 text-right align-top whitespace-nowrap border-b border-divider/40">
+                              <div className="flex items-center justify-end gap-1.5" onClick={e => e.stopPropagation()}>
+                                <button 
+                                  type="button" 
+                                  onClick={() => setViewingOrder(wo)}
+                                  className="p-1.5 text-tertiary hover:text-blue-400 hover:bg-blue-500/10 rounded-xl transition cursor-pointer"
+                                  title="View order details"
+                                >
+                                  <Eye className="w-4 h-4" />
+                                </button>
+                                <button 
+                                  type="button" 
+                                  onClick={() => setEditingOrder(wo)}
+                                  className="p-1.5 text-tertiary hover:text-emerald-400 hover:bg-emerald-500/10 rounded-xl transition cursor-pointer"
+                                  title="Edit work order"
+                                >
+                                  <Pencil className="w-4 h-4" />
+                                </button>
+                                <button 
+                                  type="button" 
+                                  onClick={(e) => handleDeleteWorkOrder(wo.id, e)}
+                                  className="p-1.5 text-tertiary hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition cursor-pointer"
+                                  title="Move to trash"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </td>
+                          </>
+                        )}
+                      </tr>
+                    );
+                  });
                 })}
               </tbody>
             </table>
           ) : (
-            <table className="w-full border-collapse">
-              <thead className="sticky top-0 bg-surface/80 backdrop-blur-md z-10 shadow-sm">
-                <tr className="border-b border-divider text-[11px] uppercase tracking-widest text-quaternary">
-                  <th className="text-center px-6 py-4 font-semibold">PO ID</th>
-                  <th className="text-center px-6 py-4 font-semibold">Task Name</th>
-                  <th className="text-center px-6 py-4 font-semibold">Issue Description</th>
-                  <th className="text-center px-6 py-4 font-semibold">Time Elapsed</th>
-                  <th className="text-center px-6 py-4 font-semibold">Priority</th>
-                  <th className="text-center px-6 py-4 font-semibold">Status</th>
-                  <th className="text-center px-6 py-4 font-semibold">Actions</th>
+            <table className="w-full border-collapse text-left text-xs">
+              <thead className="sticky top-0 bg-surface/90 backdrop-blur-md z-10 shadow-xs border-b border-divider/60">
+                <tr className="text-[11px] font-semibold uppercase tracking-wider text-tertiary">
+                  <th className="px-5 py-3.5">PO ID & Date</th>
+                  <th className="px-4 py-3.5">Requisition / Part</th>
+                  <th className="px-4 py-3.5">Related Machine/WO</th>
+                  <th className="px-4 py-3.5">Time Elapsed</th>
+                  <th className="px-4 py-3.5">Priority</th>
+                  <th className="px-4 py-3.5">Status</th>
+                  <th className="px-5 py-3.5 text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-divider-subtle">
-                {procurementOrders.filter(po => {
-                  if (!searchQuery) return true;
-                  const sq = searchQuery.toLowerCase();
-                  return po.id.toLowerCase().includes(sq) || 
-                         (po.taskName || '').toLowerCase().includes(sq) || 
-                         (po.workOrderId || '').toLowerCase().includes(sq);
-                }).flatMap((po) => {
+              <tbody className="divide-y divide-divider/40">
+                {filteredProcurementOrders.flatMap((po) => {
                   let items = po.items && po.items.length > 0 ? po.items : [null];
                   
                   if (po.items && po.items.length > 0) {
@@ -1352,58 +1785,112 @@ export default function MaintenanceOrders() {
                   
                   if (items.length === 0) return [];
 
-                  return items.map((item, index) => (
-                    <tr key={`${po.id}-${item ? item.id : 'base'}`} className={`hover:bg-surface/50 transition-colors group cursor-pointer ${index === 0 ? '' : 'border-t-0'}`} onClick={() => setViewingOrder(po)}>
-                      {index === 0 && (
-                        <td rowSpan={items.length} className="text-center px-6 py-4 whitespace-nowrap text-sm font-medium text-primary align-middle border-b border-divider-subtle">
-                          {po.id}
-                          <div className="text-[10px] text-quaternary font-normal mt-0.5">{po.dateReported}</div>
+                  return items.map((item, index) => {
+                    const statusObj = getStatusBadge(po.status);
+                    const itemPriority = item?.priority || 'Medium';
+
+                    return (
+                      <tr 
+                        key={`${po.id}-${item ? item.id : 'base'}`} 
+                        className="hover:bg-surface-elevated/40 transition-colors group cursor-pointer" 
+                        onClick={() => setViewingOrder(po)}
+                      >
+                        {/* ID Column */}
+                        {index === 0 && (
+                          <td rowSpan={items.length} className="px-5 py-3.5 align-top border-b border-divider/40">
+                            <span className="font-bold text-primary text-xs tracking-tight block">
+                              {po.id}
+                            </span>
+                            <span className="text-[10px] text-tertiary mt-0.5 block">
+                              {po.dateReported ? po.dateReported.split('T')[0] : 'Today'}
+                            </span>
+                          </td>
+                        )}
+
+                        {/* Part Name */}
+                        <td className="px-4 py-3.5 align-middle border-b border-divider/40">
+                          <span className="font-bold text-primary block truncate max-w-xs">
+                            {item ? item.name || '-' : (po.taskName || '-')}
+                          </span>
+                          {item?.quantity && (
+                            <span className="text-[10px] text-tertiary mt-0.5 block">
+                              Qty: <span className="font-semibold text-secondary">{item.quantity}</span>
+                            </span>
+                          )}
                         </td>
-                      )}
-                      <td className="text-center px-6 py-4 text-sm text-secondary align-middle border-b border-divider-subtle border-dashed">
-                        <bdi dir="auto">{item ? item.name || '-' : (po.taskName || '-')}</bdi>
-                      </td>
-                      <td className="text-center px-6 py-4 text-sm text-muted max-w-[200px] align-middle border-b border-divider-subtle border-dashed">
-                        <div className="truncate text-xs" title={item ? item.description : ''}>
-                          <bdi dir="auto">{item ? item.description || '-' : '-'}</bdi>
-                        </div>
-                      </td>
-                      <td className="text-center px-6 py-4 whitespace-nowrap text-xs text-secondary font-mono align-middle border-b border-divider-subtle border-dashed">
-                        <TimeElapsedCounter dateString={item ? item.dateSent : po.dateReported} endDateString={item ? item.dateCompleted : po.dateCompleted} isFinished={item ? item.state === 'Completed' : (po.status === 'Completed' || po.status === 'Finished')} />
-                      </td>
-                      <td className="text-center px-6 py-4 whitespace-nowrap align-middle border-b border-divider-subtle border-dashed">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] uppercase font-bold border ${getPriorityColor(item ? (item.priority || 'Low') : 'Low')}`}>
-                          {item ? (item.priority || 'Low') : 'Low'}
-                        </span>
-                      </td>
-                      {index === 0 && (
-                        <>
-                          <td rowSpan={items.length} className="text-center px-6 py-4 whitespace-nowrap align-middle border-b border-divider-subtle">
-                            <div className={`flex items-center justify-center gap-1.5 text-xs font-medium ${getStatusColor(po.status)}`}>
-                              {getStatusIcon(po.status)}
-                              {po.status}
-                            </div>
-                          </td>
-                          <td rowSpan={items.length} className="text-center px-6 py-4 whitespace-nowrap text-sm font-medium align-middle border-b border-divider-subtle">
-                            <div className="flex justify-center gap-1">
-                              <button type="button" 
-                                onClick={(e) => { e.stopPropagation(); setEditingOrder(po); }}
-                                className="text-tertiary hover:text-primary transition-colors p-1.5 rounded-lg hover:bg-surface-elevated"
-                              >
-                                <Pencil className="w-4 h-4" />
-                              </button>
-                              <button type="button" 
-                                onClick={(e) => handleDeleteProcurementOrder(po.id, e)}
-                                className="text-tertiary hover:text-red-500 transition-colors p-1.5 rounded-lg hover:bg-red-500/10"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </td>
-                        </>
-                      )}
-                    </tr>
-                  ));
+
+                        {/* Related Machine/WO */}
+                        <td className="px-4 py-3.5 align-middle border-b border-divider/40 max-w-[200px]">
+                          {po.workOrderId ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-400">
+                              <Wrench className="w-3 h-3" />
+                              {po.workOrderId}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-tertiary">Direct Requisition</span>
+                          )}
+                        </td>
+
+                        {/* Time Elapsed */}
+                        <td className="px-4 py-3.5 align-middle whitespace-nowrap border-b border-divider/40">
+                          <TimeElapsedCounter 
+                            dateString={item ? item.dateSent : po.dateReported} 
+                            endDateString={item ? item.dateCompleted : po.dateCompleted} 
+                            isFinished={item ? item.state === 'Completed' : (po.status === 'Completed' || po.status === 'Finished')} 
+                          />
+                        </td>
+
+                        {/* Priority Badge */}
+                        <td className="px-4 py-3.5 align-middle whitespace-nowrap border-b border-divider/40">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] uppercase font-bold border ${getPriorityBadge(itemPriority)}`}>
+                            {itemPriority}
+                          </span>
+                        </td>
+
+                        {/* Status Column */}
+                        {index === 0 && (
+                          <>
+                            <td rowSpan={items.length} className="px-4 py-3.5 align-top whitespace-nowrap border-b border-divider/40">
+                              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border ${statusObj.color}`}>
+                                <statusObj.icon className="w-3.5 h-3.5" />
+                                {po.status}
+                              </span>
+                            </td>
+
+                            {/* Actions Column */}
+                            <td rowSpan={items.length} className="px-5 py-3.5 text-right align-top whitespace-nowrap border-b border-divider/40">
+                              <div className="flex items-center justify-end gap-1.5" onClick={e => e.stopPropagation()}>
+                                <button 
+                                  type="button" 
+                                  onClick={() => setViewingOrder(po)}
+                                  className="p-1.5 text-tertiary hover:text-blue-400 hover:bg-blue-500/10 rounded-xl transition cursor-pointer"
+                                  title="View procurement details"
+                                >
+                                  <Eye className="w-4 h-4" />
+                                </button>
+                                <button 
+                                  type="button" 
+                                  onClick={() => setEditingOrder(po)}
+                                  className="p-1.5 text-tertiary hover:text-emerald-400 hover:bg-emerald-500/10 rounded-xl transition cursor-pointer"
+                                  title="Edit request"
+                                >
+                                  <Pencil className="w-4 h-4" />
+                                </button>
+                                <button 
+                                  type="button" 
+                                  onClick={(e) => handleDeleteProcurementOrder(po.id, e)}
+                                  className="p-1.5 text-tertiary hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition cursor-pointer"
+                                  title="Move to trash"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </td>
+                          </>
+                        )}
+                      </tr>
+                    );
+                  });
                 })}
               </tbody>
             </table>
@@ -1414,127 +1901,156 @@ export default function MaintenanceOrders() {
       {/* New/Edit Order Modal */}
       {(isCreatingOrder || editingOrder) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-canvas/80 backdrop-blur-sm" onClick={() => { setIsCreatingOrder(false); setEditingOrder(null); }}></div>
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-xs" onClick={() => { setIsCreatingOrder(false); setEditingOrder(null); }}></div>
           {(() => {
-            const isEditing = !!editingOrder;
             const isMaintenance = activeTab === 'Maintenance';
             if (isMaintenance) {
-              return <MaintenanceOrderEditor initialOrder={(editingOrder as WorkOrder) || null} onSave={handleSaveMO} onCancel={() => { setIsCreatingOrder(false); setEditingOrder(null); }} />;
+              return (
+                <MaintenanceOrderEditor 
+                  initialOrder={(editingOrder as WorkOrder) || null} 
+                  machinesList={machinesList}
+                  onSave={handleSaveMO} 
+                  onCancel={() => { setIsCreatingOrder(false); setEditingOrder(null); }} 
+                />
+              );
             }
-            return <ProcurementOrderEditor initialOrder={(editingOrder as ProcurementOrder) || null} workOrders={workOrders} onSave={handleSavePO} onCancel={() => { setIsCreatingOrder(false); setEditingOrder(null); }} />;
+            return (
+              <ProcurementOrderEditor 
+                initialOrder={(editingOrder as ProcurementOrder) || null} 
+                workOrders={workOrders} 
+                onSave={handleSavePO} 
+                onCancel={() => { setIsCreatingOrder(false); setEditingOrder(null); }} 
+              />
+            );
           })()}
         </div>
       )}
 
-      
-      {/* View Order Modal */}
+      {/* VIEW ORDER DETAILS MODAL */}
       {viewingOrder && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-canvas/80 backdrop-blur-sm" onClick={() => setViewingOrder(null)}></div>
-          <div className="relative bg-surface border border-divider rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh]">
-            <div className="px-6 py-4 border-b border-divider flex justify-between items-center bg-canvas/50">
-              <h3 className="text-lg font-bold text-primary-muted flex items-center gap-2">
-                {viewingOrder.id.startsWith('MO-') ? (
-                  <><Wrench className="w-5 h-5 text-blue-400" /> Maintenance Order Details</>
-                ) : (
-                  <><Package className="w-5 h-5 text-blue-400" /> Procurement Order Details</>
-                )}
-              </h3>
-              <button type="button" 
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-xs" onClick={() => setViewingOrder(null)}></div>
+          <div className="relative bg-surface border border-divider rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[88vh] animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-6 py-4 border-b border-divider flex justify-between items-center bg-canvas/40 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
+                  {viewingOrder.id.startsWith('MO-') ? <Wrench className="w-5 h-5" /> : <Package className="w-5 h-5" />}
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-primary flex items-center gap-2">
+                    {viewingOrder.id}
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full border font-bold ${getStatusBadge(viewingOrder.status).color}`}>
+                      {viewingOrder.status}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-tertiary">
+                    {viewingOrder.id.startsWith('MO-') ? 'Maintenance Work Order Records' : 'Parts Procurement Requisition'}
+                  </p>
+                </div>
+              </div>
+              <button 
+                type="button" 
                 onClick={() => setViewingOrder(null)}
-                className="text-quaternary hover:text-muted transition-colors cursor-pointer"
+                className="text-tertiary hover:text-primary transition-colors p-1.5 rounded-xl hover:bg-surface-elevated cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
             
-            <div className="p-6 overflow-y-auto space-y-4">
-              <div className="grid gap-1">
-                <span className="text-xs font-semibold text-quaternary">Document Number</span>
-                <span className="font-medium text-primary">{viewingOrder.id}</span>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                {viewingOrder.taskName && (
-                  <div className="grid gap-1">
-                    <span className="text-xs font-semibold text-quaternary">Task Name</span>
-                    <span className="font-medium text-secondary">{viewingOrder.taskName}</span>
-                  </div>
-                )}
-                {viewingOrder.status && (
-                  <div className="grid gap-1">
-                    <span className="text-xs font-semibold text-quaternary">Status</span>
-                    <div className={`flex items-center gap-1.5 text-sm font-medium ${getStatusColor(viewingOrder.status)}`}>
-                      {getStatusIcon(viewingOrder.status)} {viewingOrder.status}
-                    </div>
-                  </div>
-                )}
-              </div>
+            <div className="p-6 overflow-y-auto space-y-5">
               
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-1">
-                  <span className="text-xs font-semibold text-quaternary">Date Reported</span>
-                  <span className="text-sm text-secondary">{viewingOrder.dateReported}</span>
+              {/* Top Overview Cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                <div className="p-3 rounded-xl bg-canvas border border-divider-subtle">
+                  <span className="text-[10px] uppercase font-bold text-tertiary">Task / Title</span>
+                  <p className="font-bold text-xs text-primary mt-0.5 truncate">{viewingOrder.taskName || '-'}</p>
+                </div>
+
+                {'machineName' in viewingOrder && viewingOrder.machineName && (
+                  <div className="p-3 rounded-xl bg-canvas border border-divider-subtle">
+                    <span className="text-[10px] uppercase font-bold text-tertiary">Target Machine</span>
+                    <p className="font-bold text-xs text-blue-400 mt-0.5 truncate">{viewingOrder.machineName}</p>
+                  </div>
+                )}
+
+                <div className="p-3 rounded-xl bg-canvas border border-divider-subtle">
+                  <span className="text-[10px] uppercase font-bold text-tertiary">Date Logged</span>
+                  <p className="font-semibold text-xs text-secondary mt-0.5">{viewingOrder.dateReported ? viewingOrder.dateReported.split('T')[0] : 'Today'}</p>
                 </div>
               </div>
 
-              {viewingOrder.id.startsWith('PO-') && (
-                <div className="grid grid-cols-2 gap-4">
-
-
+              {/* Issue Description */}
+              {'issue' in viewingOrder && viewingOrder.issue && (
+                <div className="p-4 rounded-xl bg-canvas/60 border border-divider-subtle space-y-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-tertiary">Reported Symptom & Diagnostic</span>
+                  <p className="text-xs text-secondary leading-relaxed">{viewingOrder.issue}</p>
                 </div>
               )}
 
-              {viewingOrder.issue && (
-                <div className="grid gap-1">
-                  <span className="text-xs font-semibold text-quaternary">Issue Description</span>
-                  <span className="text-sm text-secondary bg-surface-elevated/50 p-3 rounded-lg">{viewingOrder.issue}</span>
-                </div>
-              )}
-
+              {/* Items & Tasks Checklist */}
               {viewingOrder.items && viewingOrder.items.length > 0 && (
-                <div className="grid gap-2 pt-2">
-                  <span className="text-xs font-semibold text-quaternary">Order Items</span>
-                  <div className="space-y-3">
+                <div className="space-y-3 pt-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-primary flex items-center gap-1.5">
+                      <Layers className="w-3.5 h-3.5 text-blue-400" />
+                      Checklist Items & Stages ({viewingOrder.items.length})
+                    </span>
+                  </div>
+
+                  <div className="space-y-2.5">
                     {viewingOrder.items.map((item, idx) => (
-                      <div key={item.id} className="p-3 border border-surface-elevated rounded-lg bg-canvas/30 space-y-2">
+                      <div key={item.id} className="p-3.5 border border-divider rounded-xl bg-canvas/40 space-y-2.5">
                         <div className="flex justify-between items-center">
-                          <h5 className="text-sm font-bold text-primary">{item.name || `Item ${idx + 1}`}</h5>
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] uppercase font-bold border ${getStatusColor(item.state)}`}>
+                          <div className="flex items-center gap-2">
+                            <span className="w-5 h-5 rounded-md bg-surface-elevated text-[11px] font-bold text-tertiary flex items-center justify-center">
+                              {idx + 1}
+                            </span>
+                            <h5 className="text-xs font-bold text-primary">{item.name || `Task ${idx + 1}`}</h5>
+                          </div>
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] uppercase font-bold border ${getStatusBadge(item.state).color}`}>
                             {item.state}
                           </span>
                         </div>
+
                         {item.description && (
-                          <p className="text-xs text-secondary">{item.description}</p>
+                          <p className="text-xs text-secondary pl-7">{item.description}</p>
                         )}
-                        <div className="grid grid-cols-3 gap-2 mt-2">
-                          <div className="grid gap-1">
-                            <span className="text-[10px] text-quaternary font-semibold">Quantity</span>
-                            <span className="text-xs text-primary">{item.quantity}</span>
+
+                        <div className="flex items-center justify-between pt-2 border-t border-divider-subtle text-xs">
+                          <div className="text-[11px] text-tertiary">
+                            Quantity: <span className="font-bold text-primary">{item.quantity}</span> | Priority: <span className="font-bold text-secondary">{item.priority}</span>
                           </div>
-                          <div className="grid gap-1">
-                            <span className="text-[10px] text-quaternary font-semibold">Date Sent</span>
-                            <span className="text-xs text-primary">{item.dateSent}</span>
-                          </div>
-                          <div className="grid gap-1">
-                            <span className="text-[10px] text-quaternary font-semibold">Priority</span>
-                            <span className="text-xs text-primary">{item.priority}</span>
+
+                          <div className="flex items-center gap-2">
+                            <button 
+                              type="button" 
+                              onClick={() => handleCheckItem(viewingOrder.id, item.id)}
+                              className="text-[11px] font-semibold bg-surface-elevated hover:bg-surface text-secondary hover:text-primary px-2.5 py-1 rounded-lg border border-divider-subtle transition cursor-pointer"
+                            >
+                              Check
+                            </button>
+                            {item.state !== 'Completed' && (
+                              <button 
+                                type="button" 
+                                onClick={() => handleCompleteItem(viewingOrder.id, item.id)}
+                                className="text-[11px] font-semibold bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-400 px-2.5 py-1 rounded-lg border border-emerald-500/30 transition cursor-pointer flex items-center gap-1"
+                              >
+                                <Check className="w-3 h-3" /> Complete
+                              </button>
+                            )}
                           </div>
                         </div>
-                        <div className="flex justify-between items-center mt-2 pt-2 border-t border-divider-subtle">
-                          <span className="text-[10px] text-quaternary">
-                            Last checked: <span className="font-medium text-secondary">{item.lastChecked ? formatDistanceToNow(new Date(item.lastChecked), { addSuffix: true }) : 'Never'}</span>
-                          </span>
-                          <button type="button" 
-                            onClick={() => handleCheckItem(viewingOrder.id, item.id)}
-                            className="text-[10px] bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 px-2 py-1 rounded-lg transition-colors cursor-pointer"
-                          >
-                            Mark as Checked
-                          </button>
-                        </div>
+
                         {item.images && item.images.length > 0 && (
-                          <div className="grid grid-cols-3 gap-2 mt-2">
+                          <div className="flex flex-wrap gap-2 pt-2 border-t border-divider-subtle">
                             {item.images.map((img, i) => (
-                              <img key={i} src={img} alt={`Item attached ${i + 1}`} className="rounded border border-divider-subtle w-full h-16 object-cover cursor-pointer hover:opacity-80 transition-opacity" onClick={() => setZoomedImage(img)} />
+                              <img 
+                                key={i} 
+                                src={img} 
+                                alt={`Item attached ${i + 1}`} 
+                                className="rounded-lg border border-divider-subtle w-16 h-16 object-cover cursor-pointer hover:opacity-80 transition" 
+                                onClick={() => setZoomedImage(img)} 
+                              />
                             ))}
                           </div>
                         )}
@@ -1544,42 +2060,58 @@ export default function MaintenanceOrders() {
                 </div>
               )}
 
+              {/* Attachments Section */}
               {('requestForms' in viewingOrder && viewingOrder.requestForms && viewingOrder.requestForms.length > 0) && (
-                <div className="grid gap-2 pt-2">
-                  <span className="text-xs font-semibold text-quaternary">{viewingOrder.id.startsWith('PO-') ? 'Attached Quotes/Invoices' : 'Request Forms'}</span>
-                  <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-2 pt-2">
+                  <span className="text-xs font-bold text-primary">
+                    Attached Invoices & Documents ({viewingOrder.requestForms.length})
+                  </span>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
                     {viewingOrder.requestForms.map((fileData, idx) => {
                       const isPdf = fileData.startsWith('data:application/pdf');
                       if (isPdf) {
                         return (
-                          <div key={idx} className="flex items-center justify-center p-4 rounded-lg border border-divider-subtle bg-surface/50 h-32 text-blue-400">
-                            <a href={fileData} download={`Attachment_${idx + 1}.pdf`} className="flex flex-col items-center gap-2 hover:text-blue-300">
-                              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-8 h-8"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>
-                              <span className="text-xs font-bold underline">Download PDF</span>
+                          <div key={idx} className="flex items-center justify-center p-3 rounded-xl border border-divider bg-canvas text-blue-400 h-28">
+                            <a href={fileData} download={`Attachment_${idx + 1}.pdf`} className="flex flex-col items-center gap-1.5 hover:text-blue-300">
+                              <FileText className="w-7 h-7" />
+                              <span className="text-[11px] font-bold underline">Download PDF</span>
                             </a>
                           </div>
                         );
                       }
-                      return <img key={idx} src={fileData} alt={`Attachment ${idx + 1}`} className="rounded border border-divider-subtle w-full h-32 object-cover cursor-pointer hover:opacity-80 transition-opacity" onClick={() => setZoomedImage(fileData)} />;
+                      return (
+                        <img 
+                          key={idx} 
+                          src={fileData} 
+                          alt={`Attachment ${idx + 1}`} 
+                          className="rounded-xl border border-divider w-full h-28 object-cover cursor-pointer hover:opacity-80 transition shadow-xs" 
+                          onClick={() => setZoomedImage(fileData)} 
+                        />
+                      );
                     })}
                   </div>
                 </div>
               )}
             </div>
             
-            <div className="px-6 py-4 border-t border-divider flex justify-between gap-3 bg-canvas/50">
-              <button type="button" 
+            {/* Modal Bottom Toolbar */}
+            <div className="px-6 py-4 border-t border-divider flex justify-between gap-3 bg-canvas/40 shrink-0">
+              <button 
+                type="button" 
                 onClick={() => {
                   if (viewingOrder.id.startsWith('MO-')) handleDeleteWorkOrder(viewingOrder.id);
                   else handleDeleteProcurementOrder(viewingOrder.id);
                 }}
-                className="px-4 py-2 bg-red-600/10 border border-red-600/20 text-red-500 rounded-lg text-sm font-medium hover:bg-red-600 hover:text-white-fixed transition-colors flex items-center gap-2"
+                className="px-3.5 py-2 bg-rose-600/10 hover:bg-rose-600/20 text-rose-400 border border-rose-500/20 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
               >
-                <Trash2 className="w-4 h-4" /> Delete {viewingOrder.id.startsWith('MO-') ? 'Order' : 'Request'}
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Move to Trash</span>
               </button>
-              <button type="button" 
+
+              <button 
+                type="button" 
                 onClick={() => setViewingOrder(null)}
-                className="px-4 py-2 bg-surface hover:bg-surface-elevated border border-surface-strong text-secondary rounded-lg text-sm font-medium transition-colors cursor-pointer"
+                className="px-4 py-2 bg-surface hover:bg-surface-elevated border border-divider text-secondary hover:text-primary rounded-xl text-xs font-semibold transition cursor-pointer"
               >
                 Close
               </button>
@@ -1587,15 +2119,17 @@ export default function MaintenanceOrders() {
           </div>
         </div>
       )}
-{/* Image Zoom Modal */}
+
+      {/* Image Pan & Zoom Modal */}
       {zoomedImage && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-canvas/90 backdrop-blur-sm" onClick={() => setZoomedImage(null)}>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md" onClick={() => setZoomedImage(null)}>
           <div className="relative max-w-5xl max-h-[90vh] w-full flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
-            <button type="button" 
+            <button 
+              type="button" 
               onClick={(e) => { e.stopPropagation(); setZoomedImage(null); }}
-              className="absolute -top-12 right-0 md:-right-12 text-secondary hover:text-primary bg-surface/50 hover:bg-surface p-2 rounded-full backdrop-blur-md transition-all z-10 cursor-pointer"
+              className="absolute -top-12 right-0 md:-right-12 text-secondary hover:text-primary bg-surface/70 hover:bg-surface p-2 rounded-full backdrop-blur-md transition z-10 cursor-pointer"
             >
-              <X className="w-6 h-6" />
+              <X className="w-5 h-5" />
             </button>
             <TransformWrapper
               initialScale={1}
@@ -1604,7 +2138,7 @@ export default function MaintenanceOrders() {
               centerOnInit
             >
               <TransformComponent wrapperStyle={{ width: '100%', height: '100%', maxHeight: '90vh' }}>
-                <img src={zoomedImage} alt="Zoomed View" className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl" />
+                <img src={zoomedImage} alt="Zoomed View" className="max-w-full max-h-[90vh] object-contain rounded-xl shadow-2xl" />
               </TransformComponent>
             </TransformWrapper>
           </div>
