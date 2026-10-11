@@ -365,6 +365,17 @@ export async function updateUserPassword(username: string, newPassword: string):
   }
 }
 
+export async function updateUserRole(username: string, newRole: string): Promise<void> {
+  if (activeDbType === 'postgres' && pgPool) {
+    await pgPool.query("UPDATE users SET role = $1 WHERE username = $2", [newRole, username]);
+    return;
+  }
+  if (sqliteDb) {
+    const stmt = sqliteDb.prepare("UPDATE users SET role = ? WHERE username = ?");
+    stmt.run(newRole, username);
+  }
+}
+
 export async function deleteUser(username: string): Promise<void> {
   if (activeDbType === 'postgres' && pgPool) {
     await pgPool.query("DELETE FROM users WHERE username = $1", [username]);

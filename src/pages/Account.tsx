@@ -58,7 +58,7 @@ function generateSecurePassword(): string {
 }
 
 export default function Account() {
-  const { user } = useAuth();
+  const { user, login } = useAuth();
   const [roles] = useLocalStorage<Role[]>('app_roles', []);
   const allRoles = useMemo(() => roles.length > 0 ? roles : defaultRoles, [roles]);
 
@@ -99,6 +99,13 @@ export default function Account() {
   const [targetModalSuccess, setTargetModalSuccess] = useState('');
   const [isTargetModalSubmitting, setIsTargetModalSubmitting] = useState(false);
   const [copiedTargetPass, setCopiedTargetPass] = useState(false);
+
+  // Admin changing specific user role modal state
+  const [targetRoleModal, setTargetRoleModal] = useState<string | null>(null);
+  const [targetSelectedRole, setTargetSelectedRole] = useState<string>('worker');
+  const [roleModalError, setRoleModalError] = useState('');
+  const [roleModalSuccess, setRoleModalSuccess] = useState('');
+  const [isRoleModalSubmitting, setIsRoleModalSubmitting] = useState(false);
 
   const fetchUsers = async () => {
     setIsLoadingUsers(true);
@@ -335,6 +342,50 @@ export default function Account() {
       setTargetModalError('Connection error occurred');
     } finally {
       setIsTargetModalSubmitting(false);
+    }
+  };
+
+  // Admin Override Role for Target User
+  const handleSaveTargetUserRole = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!targetRoleModal) return;
+    setRoleModalError('');
+    setRoleModalSuccess('');
+
+    if (targetRoleModal === 'admin' && targetSelectedRole !== 'super-admin') {
+      setRoleModalError('Root admin account cannot be demoted.');
+      return;
+    }
+
+    setIsRoleModalSubmitting(true);
+    try {
+      const res = await fetch(`/api/users/${targetRoleModal}/role`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          role: targetSelectedRole
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        const roleLabel = allRoles.find(r => r.id === targetSelectedRole)?.name || targetSelectedRole;
+        setRoleModalSuccess(`Role for "${targetRoleModal}" updated to ${roleLabel}!`);
+        await logAction('Account', `Admin updated role for user: ${targetRoleModal} to ${targetSelectedRole}`, 'warning');
+        if (targetRoleModal === user?.username) {
+          login({ ...user, role: targetSelectedRole });
+        }
+        fetchUsers();
+        setTimeout(() => {
+          setTargetRoleModal(null);
+          setRoleModalSuccess('');
+        }, 1200);
+      } else {
+        setRoleModalError(data.error || 'Failed to update user role');
+      }
+    } catch (err) {
+      setRoleModalError('Connection error occurred');
+    } finally {
+      setIsRoleModalSubmitting(false);
     }
   };
 
@@ -842,10 +893,29 @@ export default function Account() {
 
                             {/* Role Column */}
                             <td className="py-3.5 px-3">
-                              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border ${rStyle.bg}`}>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (isRootAdmin) return;
+                                  setTargetRoleModal(u.username);
+                                  setTargetSelectedRole(u.role);
+                                  setRoleModalError('');
+                                  setRoleModalSuccess('');
+                                }}
+                                disabled={isRootAdmin}
+                                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border transition ${rStyle.bg} ${
+                                  isRootAdmin 
+                                    ? 'cursor-default' 
+                                    : 'hover:opacity-90 hover:ring-1 hover:ring-purple-400/40 cursor-pointer'
+                                }`}
+                                title={isRootAdmin ? "Root admin role is locked" : `Click to change role for ${u.username}`}
+                              >
                                 <rStyle.icon className="w-3.5 h-3.5" />
-                                {rStyle.name}
-                              </span>
+                                <span>{rStyle.name}</span>
+                                {!isRootAdmin && (
+                                  <span className="text-[10px] opacity-70 underline ml-0.5 font-normal">Edit</span>
+                                )}
+                              </button>
                             </td>
 
                             {/* Status Column */}
@@ -859,6 +929,27 @@ export default function Account() {
                             {/* Actions Column */}
                             <td className="py-3.5 pr-2 text-right">
                               <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (isRootAdmin) return;
+                                    setTargetRoleModal(u.username);
+                                    setTargetSelectedRole(u.role);
+                                    setRoleModalError('');
+                                    setRoleModalSuccess('');
+                                  }}
+                                  disabled={isRootAdmin}
+                                  className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-medium transition border ${
+                                    isRootAdmin
+                                      ? 'opacity-40 cursor-not-allowed bg-surface-elevated/40 text-tertiary border-divider-subtle'
+                                      : 'bg-surface-elevated/70 hover:bg-purple-500/10 hover:border-purple-500/30 text-secondary hover:text-purple-400 border-divider-subtle cursor-pointer'
+                                  }`}
+                                  title={isRootAdmin ? "Root admin role is locked" : `Modify role and permissions for ${u.username}`}
+                                >
+                                  <Shield className="w-3.5 h-3.5 text-purple-400" />
+                                  <span className="hidden sm:inline">Change Role</span>
+                                </button>
+
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -1193,6 +1284,123 @@ export default function Account() {
                 >
                   <Check className="w-4 h-4" />
                   <span>{isTargetModalSubmitting ? 'Saving...' : 'Apply Password'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT USER ROLE MODAL */}
+      {targetRoleModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <div className="bg-surface border border-divider rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-divider">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-primary">
+                    Modify Account Role
+                  </h3>
+                  <p className="text-[11px] text-tertiary">
+                    Target account: <span className="font-semibold text-blue-400">{targetRoleModal}</span>
+                  </p>
+                </div>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setTargetRoleModal(null)}
+                className="text-tertiary hover:text-primary transition-colors p-1 rounded-lg hover:bg-surface-elevated cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Warning if editing own role */}
+            {targetRoleModal === user?.username && (
+              <div className="flex items-start gap-2 p-2.5 bg-amber-500/10 border border-amber-500/20 text-amber-300 rounded-xl text-xs font-medium">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>Notice: You are updating your own active account role. System clearances will immediately reflect the new permissions.</span>
+              </div>
+            )}
+
+            {/* Role Selection Grid */}
+            <form onSubmit={handleSaveTargetUserRole} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-secondary mb-2">
+                  Select New Operational Role
+                </label>
+                <div className="grid grid-cols-1 gap-2 max-h-64 overflow-y-auto pr-1">
+                  {allRoles.map(r => {
+                    const isSelected = targetSelectedRole === r.id;
+                    const rStyle = getRoleStyle(r.id, r.name);
+                    return (
+                      <button
+                        key={r.id}
+                        type="button"
+                        onClick={() => setTargetSelectedRole(r.id)}
+                        className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex items-start justify-between gap-3 ${
+                          isSelected
+                            ? 'bg-purple-600/10 border-purple-500/40 text-purple-400 ring-1 ring-purple-500/30'
+                            : 'bg-canvas hover:bg-surface-elevated border-divider text-secondary'
+                        }`}
+                      >
+                        <div className="flex items-start gap-2.5 min-w-0">
+                          <div className={`w-8 h-8 rounded-lg bg-gradient-to-tr ${rStyle.avatarGradient} flex items-center justify-center text-white shrink-0 mt-0.5 shadow-xs`}>
+                            <rStyle.icon className="w-4 h-4" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className={`font-bold text-xs ${isSelected ? 'text-purple-400' : 'text-primary'}`}>
+                              {r.name}
+                            </p>
+                            <p className="text-[11px] text-tertiary mt-0.5 line-clamp-2">
+                              {r.description || 'Standard access permissions'}
+                            </p>
+                          </div>
+                        </div>
+                        {isSelected && (
+                          <div className="w-5 h-5 rounded-full bg-purple-600 text-white flex items-center justify-center shrink-0 shadow-xs mt-1">
+                            <Check className="w-3 h-3" />
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {roleModalError && (
+                <div className="flex items-center gap-2 p-2.5 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl text-xs font-medium">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  <span>{roleModalError}</span>
+                </div>
+              )}
+
+              {roleModalSuccess && (
+                <div className="flex items-center gap-2 p-2.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl text-xs font-medium">
+                  <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                  <span>{roleModalSuccess}</span>
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setTargetRoleModal(null)}
+                  className="px-3.5 py-2 rounded-xl text-xs font-medium text-tertiary hover:text-primary hover:bg-surface-elevated transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isRoleModalSubmitting}
+                  className="px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm shadow-purple-600/20 cursor-pointer"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>{isRoleModalSubmitting ? 'Saving Role...' : 'Assign Role'}</span>
                 </button>
               </div>
             </form>

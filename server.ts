@@ -12,6 +12,7 @@ import {
   getAllUsers,
   createUser,
   updateUserPassword,
+  updateUserRole,
   deleteUser
 } from "./db";
 
@@ -137,6 +138,23 @@ async function startServer() {
       } else {
         res.status(500).json({ error: err.message });
       }
+    }
+  });
+
+  app.put("/api/users/:username/role", async (req, res) => {
+    const username = req.params.username;
+    const { role } = req.body;
+    if (!role) {
+      return res.status(400).json({ error: "Role is required" });
+    }
+    if (username === 'admin' && role !== 'super-admin') {
+      return res.status(400).json({ error: "Cannot demote root admin account" });
+    }
+    try {
+      await updateUserRole(username, role);
+      res.json({ success: true, message: "User role updated successfully" });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
     }
   });
 

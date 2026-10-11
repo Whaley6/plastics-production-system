@@ -199,6 +199,24 @@ app.post("/api/users", async (req, res) => {
   }
 });
 
+app.put("/api/users/:username/role", async (req, res) => {
+  const username = req.params.username;
+  const { role } = req.body;
+  if (!role) {
+    return res.status(400).json({ error: "Role is required" });
+  }
+  if (username === "admin" && role !== "super-admin") {
+    return res.status(400).json({ error: "Cannot demote root admin account" });
+  }
+  try {
+    const p = getPool();
+    await p.query("UPDATE users SET role = $1 WHERE username = $2", [role, username]);
+    res.json({ success: true, message: "User role updated successfully" });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.delete("/api/users/:username", async (req, res) => {
   const username = req.params.username;
   if (username === "admin") {
