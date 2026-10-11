@@ -1613,19 +1613,27 @@ export default function MaintenanceOrders() {
                       >
                         {/* Task & Machine */}
                         <td className="px-5 py-3.5 align-middle border-b border-divider/40">
-                          <span className="font-bold text-primary block truncate max-w-xs">
-                            {item ? item.name || '-' : (wo.taskName || '-')}
-                          </span>
-                          <div className="flex items-center gap-2 mt-0.5">
-                            {wo.machineName && (
-                              <span className="inline-flex items-center gap-1 text-[11px] text-blue-400">
-                                <Wrench className="w-2.5 h-2.5" />
-                                {wo.machineName}
+                          <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500/15 to-indigo-500/10 border border-blue-500/25 flex items-center justify-center text-blue-400 shadow-xs shrink-0">
+                              <Wrench className="w-4 h-4" />
+                            </div>
+                            <div className="min-w-0">
+                              <span className="font-bold text-primary text-xs tracking-tight block truncate group-hover:text-blue-400 transition-colors">
+                                {item ? item.name || '-' : (wo.taskName || '-')}
                               </span>
-                            )}
-                            <span className="text-[10px] text-tertiary">
-                              {wo.machineName ? '• ' : ''}{wo.dateReported ? wo.dateReported.split('T')[0] : 'Today'}
-                            </span>
+                              <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                                {wo.machineName && (
+                                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-blue-500/10 border border-blue-500/20 text-[10px] font-semibold text-blue-400">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
+                                    {wo.machineName}
+                                  </span>
+                                )}
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-surface-elevated/80 border border-divider text-[10px] font-medium text-tertiary">
+                                  <Calendar className="w-3 h-3 text-tertiary/70" />
+                                  {wo.dateReported ? wo.dateReported.split('T')[0] : 'Today'}
+                                </span>
+                              </div>
+                            </div>
                           </div>
                         </td>
 
@@ -1736,18 +1744,27 @@ export default function MaintenanceOrders() {
                       >
                         {/* Part Name */}
                         <td className="px-5 py-3.5 align-middle border-b border-divider/40">
-                          <span className="font-bold text-primary block truncate max-w-xs">
-                            {item ? item.name || '-' : (po.taskName || '-')}
-                          </span>
-                          <div className="flex items-center gap-2 mt-0.5">
-                            {item?.quantity && (
-                              <span className="text-[10px] text-tertiary">
-                                Qty: <span className="font-semibold text-secondary">{item.quantity}</span>
+                          <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-500/15 to-orange-500/10 border border-amber-500/25 flex items-center justify-center text-amber-400 shadow-xs shrink-0">
+                              <Package className="w-4 h-4" />
+                            </div>
+                            <div className="min-w-0">
+                              <span className="font-bold text-primary text-xs tracking-tight block truncate group-hover:text-amber-400 transition-colors">
+                                {item ? item.name || '-' : (po.taskName || '-')}
                               </span>
-                            )}
-                            <span className="text-[10px] text-tertiary">
-                              {item?.quantity ? '• ' : ''}{po.dateReported ? po.dateReported.split('T')[0] : 'Today'}
-                            </span>
+                              <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                                {item?.quantity && (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/20 text-[10px] font-bold text-amber-400">
+                                    <Package className="w-3 h-3 text-amber-400/80" />
+                                    Qty: {item.quantity}
+                                  </span>
+                                )}
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-surface-elevated/80 border border-divider text-[10px] font-medium text-tertiary">
+                                  <Calendar className="w-3 h-3 text-tertiary/70" />
+                                  {po.dateReported ? po.dateReported.split('T')[0] : 'Today'}
+                                </span>
+                              </div>
+                            </div>
                           </div>
                         </td>
 
