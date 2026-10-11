@@ -37,7 +37,12 @@ import {
   ClipboardPaste,
   Sparkles,
   Check,
-  Gauge
+  Gauge,
+  Activity,
+  Layers,
+  TrendingUp,
+  AlertTriangle,
+  LayoutGrid
 } from 'lucide-react';
 
 export type ProductionOrder = {
@@ -2113,102 +2118,222 @@ export default function ProductionOrders() {
     });
   };
 
+  const metrics = React.useMemo(() => {
+    let runningLines = 0;
+    let maintenanceLines = 0;
+    let queuedOrdersCount = 0;
+    let activeProducedUnits = 0;
+
+    machines.forEach((mach) => {
+      const sequence = getMachineSequence(mach.name);
+      const active = sequence.length > 0 ? sequence[0] : null;
+      if (active) {
+        if (active.status === 'In Progress') {
+          runningLines++;
+          activeProducedUnits += getProducedCount(active);
+          queuedOrdersCount += Math.max(0, sequence.length - 1);
+        } else if (active.status === 'Maintenance') {
+          maintenanceLines++;
+          activeProducedUnits += getProducedCount(active);
+          queuedOrdersCount += Math.max(0, sequence.length - 1);
+        } else {
+          queuedOrdersCount += sequence.length;
+        }
+      }
+    });
+
+    return {
+      runningLines,
+      totalMachines: machines.length,
+      maintenanceLines,
+      queuedOrdersCount,
+      activeProducedUnits
+    };
+  }, [machines, orders]);
+
   return (
-    <div className="space-y-6 relative h-full flex flex-col text-primary">
-      {/* Header */}
-      <div className="border-b border-divider pb-5 shrink-0 flex flex-col md:flex-row md:items-end justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight text-primary flex items-center gap-2">
-            <Factory className="w-6 h-6 text-purple-500 animate-pulse" />
-            Production Scheduler & Queues
-          </h2>
-          <p className="mt-1 text-sm text-tertiary">
-            Interactive machine sequence tracking matrix matching production sheet spreadsheet format.
-          </p>
+    <div className="w-full h-full flex flex-col gap-5 text-primary">
+      {/* Top Hero Banner */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 shrink-0 pb-4 border-b border-divider/60">
+        <div className="flex items-center gap-3.5">
+          <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-purple-500/20 to-indigo-500/20 border border-purple-500/30 flex items-center justify-center text-purple-400 shadow-sm shrink-0">
+            <Factory className="w-5 h-5" />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold tracking-tight text-primary flex items-center gap-2">
+              Production Scheduler & Queues
+              <span className="text-[10px] font-semibold tracking-wide uppercase px-2 py-0.5 rounded-full bg-purple-500/10 border border-purple-500/20 text-purple-400">
+                MES & Sequence Matrix
+              </span>
+            </h2>
+            <p className="text-xs text-tertiary mt-0.5">
+              Real-time machine sequencing, cycle analytics, and dynamic infinite production queue tracking.
+            </p>
+          </div>
         </div>
-        <div className="flex flex-wrap gap-2 shrink-0">
+
+        {/* Action Toolbar */}
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
           <button type="button" 
             onClick={() => setIsBatchModalOpen(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white rounded-lg text-xs font-bold transition-all shadow-sm cursor-pointer animate-in fade-in"
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white rounded-xl text-xs font-semibold transition-all shadow-sm shadow-amber-600/20 cursor-pointer"
             title="Bulk update machine cycles, cavities, and bottles/hr rates via copy & paste or one-button batch updater"
           >
             <Sparkles className="w-3.5 h-3.5 text-yellow-200" />
             <span>Batch Speeds & Cavities</span>
-            <span className="text-[10px] bg-black/20 px-1.5 py-0.5 rounded font-mono">Copy/Paste</span>
+            <span className="text-[10px] bg-black/25 px-1.5 py-0.5 rounded font-mono">Batch</span>
           </button>
 
           <button type="button" 
             onClick={() => setIsMachineSetupOpen(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-surface hover:bg-surface-elevated text-secondary border border-divider rounded-lg text-xs font-semibold transition-all cursor-pointer"
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-surface hover:bg-surface-elevated text-secondary hover:text-primary border border-divider rounded-xl text-xs font-semibold transition-all cursor-pointer shadow-xs"
           >
-            <Sliders className="w-3.5 h-3.5 text-blue-500" />
-            Machines Setup
+            <Sliders className="w-3.5 h-3.5 text-blue-400" />
+            <span>Machines Setup</span>
           </button>
           
           <button type="button" 
             onClick={handleExportAllOrders}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-surface hover:bg-surface-elevated text-secondary border border-divider rounded-lg text-xs font-semibold transition-all cursor-pointer shadow-sm"
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-surface hover:bg-surface-elevated text-secondary hover:text-primary border border-divider rounded-xl text-xs font-semibold transition-all cursor-pointer shadow-xs"
             title="Export all production orders and details to Excel"
           >
-            <Download className="w-3.5 h-3.5" />
-            Export All Details
+            <Download className="w-3.5 h-3.5 text-tertiary" />
+            <span>Export Details</span>
           </button>
           
           <button type="button" 
             onClick={handleExportMatrixExcel}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold transition-all shadow-sm cursor-pointer"
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold transition-all shadow-sm shadow-emerald-600/20 cursor-pointer"
             title="Download Spreadsheet Matrix in Excel (.xlsx) exactly as displayed"
           >
             <Download className="w-3.5 h-3.5" />
-            Export Grid (Excel)
+            <span>Export Grid (Excel)</span>
           </button>
 
           {!isViewer && (
             <button type="button" 
               onClick={() => openOrderModal()}
-              className="flex items-center gap-1.5 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-semibold transition-all shadow-sm cursor-pointer"
+              className="flex items-center gap-1.5 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-semibold transition-all shadow-sm shadow-purple-600/25 cursor-pointer"
             >
               <Plus className="w-4 h-4" />
-              New Order / Entry
+              <span>New Order / Entry</span>
             </button>
           )}
         </div>
       </div>
 
-      {/* Main Tabs and Search Controls */}
-      <div className="bg-canvas border border-divider rounded-xl shadow-sm flex-1 flex flex-col min-h-0 overflow-hidden">
-        {/* Navigation Tabs */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-divider px-4 bg-surface/20 shrink-0 gap-2">
-          <div className="flex gap-4">
+      {/* KPI Overview Metrics Bar */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5 shrink-0">
+        <div className="bg-surface border border-divider/70 rounded-2xl p-4 flex items-center gap-3.5 shadow-xs">
+          <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400 shrink-0">
+            <Activity className="w-5 h-5" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-[11px] font-medium text-tertiary uppercase tracking-wider">Active Lines Running</p>
+            <p className="text-lg font-bold text-purple-400 tracking-tight mt-0.5">
+              {metrics.runningLines} <span className="text-xs font-normal text-tertiary">/ {metrics.totalMachines} Lines</span>
+            </p>
+          </div>
+        </div>
+
+        <div className="bg-surface border border-divider/70 rounded-2xl p-4 flex items-center gap-3.5 shadow-xs">
+          <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 shrink-0">
+            <Layers className="w-5 h-5" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-[11px] font-medium text-tertiary uppercase tracking-wider">Queued Production Runs</p>
+            <p className="text-lg font-bold text-blue-400 tracking-tight mt-0.5">
+              {metrics.queuedOrdersCount} <span className="text-xs font-normal text-tertiary">Scheduled</span>
+            </p>
+          </div>
+        </div>
+
+        <div className="bg-surface border border-divider/70 rounded-2xl p-4 flex items-center gap-3.5 shadow-xs">
+          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
+            <TrendingUp className="w-5 h-5" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-[11px] font-medium text-tertiary uppercase tracking-wider">Active Output Produced</p>
+            <p className="text-lg font-bold text-emerald-400 tracking-tight mt-0.5">
+              {metrics.activeProducedUnits.toLocaleString()} <span className="text-xs font-normal text-tertiary">Units</span>
+            </p>
+          </div>
+        </div>
+
+        <div className="bg-surface border border-divider/70 rounded-2xl p-4 flex items-center gap-3.5 shadow-xs">
+          <div className="w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400 shrink-0">
+            <AlertTriangle className="w-5 h-5" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-[11px] font-medium text-tertiary uppercase tracking-wider">Maintenance / Paused</p>
+            <p className="text-lg font-bold text-rose-400 tracking-tight mt-0.5">
+              {metrics.maintenanceLines} <span className="text-xs font-normal text-tertiary">Lines</span>
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Container */}
+      <div className="bg-surface border border-divider/70 rounded-2xl shadow-sm flex-1 flex flex-col min-h-0 overflow-hidden">
+        {/* Navigation & Toolbar Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 border-b border-divider/60 bg-surface-elevated/20 shrink-0">
+          {/* Segmented Capsule Tabs */}
+          <div className="flex items-center p-1 bg-canvas/80 border border-divider/80 rounded-xl">
             <button type="button" 
               onClick={() => setViewMode('Spreadsheet')}
-              className={`py-3 text-sm font-semibold border-b-2 transition-all ${viewMode === 'Spreadsheet' ? 'border-purple-500 text-purple-400 font-bold' : 'border-transparent text-quinary hover:text-secondary'}`}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                viewMode === 'Spreadsheet'
+                  ? 'bg-purple-600 text-white shadow-xs shadow-purple-600/30'
+                  : 'text-tertiary hover:text-primary hover:bg-surface-elevated/50'
+              }`}
             >
-              Spreadsheet Queue View
+              <LayoutGrid className="w-3.5 h-3.5" />
+              <span>Queue Matrix</span>
             </button>
             <button type="button" 
               onClick={() => setViewMode('ActiveList')}
-              className={`py-3 text-sm font-semibold border-b-2 transition-all ${viewMode === 'ActiveList' ? 'border-purple-500 text-purple-400 font-bold' : 'border-transparent text-quinary hover:text-secondary'}`}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                viewMode === 'ActiveList'
+                  ? 'bg-purple-600 text-white shadow-xs shadow-purple-600/30'
+                  : 'text-tertiary hover:text-primary hover:bg-surface-elevated/50'
+              }`}
             >
-              Active Details List
+              <ClipboardList className="w-3.5 h-3.5" />
+              <span>Active Orders</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                viewMode === 'ActiveList' ? 'bg-white/20 text-white' : 'bg-surface-elevated text-tertiary'
+              }`}>
+                {orders.filter(activeNonArchiveMatches).length}
+              </span>
             </button>
             <button type="button" 
               onClick={() => setViewMode('History')}
-              className={`py-3 text-sm font-semibold border-b-2 transition-all ${viewMode === 'History' ? 'border-purple-500 text-purple-400 font-bold' : 'border-transparent text-quinary hover:text-secondary'}`}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                viewMode === 'History'
+                  ? 'bg-purple-600 text-white shadow-xs shadow-purple-600/30'
+                  : 'text-tertiary hover:text-primary hover:bg-surface-elevated/50'
+              }`}
             >
-              Archive / History ({orders.filter(archiveMatches).length})
+              <Clock className="w-3.5 h-3.5" />
+              <span>Archive / History</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                viewMode === 'History' ? 'bg-white/20 text-white' : 'bg-surface-elevated text-tertiary'
+              }`}>
+                {orders.filter(archiveMatches).length}
+              </span>
             </button>
           </div>
 
-          <div className="flex gap-2 items-center py-2">
+          {/* Search & Status Filters */}
+          <div className="flex gap-2 items-center">
             <div className="relative w-64 shrink-0">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-quaternary" />
               <input 
                 type="text"
-                placeholder="Search specs or item names..."
+                placeholder="Search specs, item names, machines..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-8 pr-3 py-1.5 bg-canvas border border-divider rounded-lg text-xs focus:ring-1 focus:ring-purple-500 outline-none transition-all text-secondary placeholder:text-quinary"
+                className="w-full pl-8 pr-3 py-1.5 bg-canvas border border-divider rounded-xl text-xs focus:ring-1 focus:ring-purple-500 outline-none transition-all text-secondary placeholder:text-quinary"
               />
             </div>
             
@@ -2216,7 +2341,7 @@ export default function ProductionOrders() {
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
-                className="bg-canvas border border-divider rounded-lg text-xs px-2.5 py-1.5 outline-none text-secondary focus:border-purple-500"
+                className="bg-canvas border border-divider rounded-xl text-xs px-2.5 py-1.5 outline-none text-secondary focus:border-purple-500"
               >
                 <option value="All">All Statuses</option>
                 {viewMode === 'ActiveList' ? (
@@ -2269,22 +2394,52 @@ export default function ProductionOrders() {
 
           const renderTableHeader = () => (
             <thead>
-              <tr className="bg-[#FFD966] text-slate-900 border-b border-divider font-bold text-xs uppercase tracking-wider">
-                <th className="text-center px-3 py-3 border border-slate-400 font-extrabold w-[60px] text-slate-950">M</th>
-                <th className="text-center px-6 py-4 border border-slate-400 font-extrabold min-w-[180px] text-slate-950">Mold</th>
-                <th className="text-center px-6 py-4 border border-slate-400 font-extrabold min-w-[200px] text-slate-950">Current Order</th>
-                <th className="text-center px-6 py-4 border border-slate-400 font-extrabold min-w-[120px] text-slate-950">Date</th>
-                <th className="text-center px-6 py-4 border border-slate-400 font-extrabold min-w-[120px] text-slate-950">TIME</th>
+              <tr className="bg-surface-elevated/95 backdrop-blur-md text-secondary border-b border-divider text-[11px] font-bold uppercase tracking-wider select-none sticky top-0 z-20 shadow-xs">
+                <th className="text-center px-3 py-3.5 border-r border-divider/60 font-extrabold w-[64px] text-tertiary">
+                  <div className="flex items-center justify-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-purple-400"></span>
+                    <span>M</span>
+                  </div>
+                </th>
+                <th className="text-center px-6 py-3.5 border-r border-divider/60 font-bold min-w-[190px] text-indigo-300">
+                  <div className="flex items-center justify-center gap-1.5">
+                    <Settings className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>Mold / Tooling</span>
+                  </div>
+                </th>
+                <th className="text-center px-6 py-3.5 border-r border-divider/60 font-bold min-w-[240px] text-emerald-400">
+                  <div className="flex items-center justify-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span>Current Active Order</span>
+                  </div>
+                </th>
+                <th className="text-center px-4 py-3.5 border-r border-divider/60 font-bold min-w-[125px] text-secondary">
+                  <div className="flex items-center justify-center gap-1.5">
+                    <Calendar className="w-3.5 h-3.5 text-tertiary" />
+                    <span>Est. Date</span>
+                  </div>
+                </th>
+                <th className="text-center px-4 py-3.5 border-r border-divider/60 font-bold min-w-[125px] text-secondary">
+                  <div className="flex items-center justify-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-tertiary" />
+                    <span>Est. Time</span>
+                  </div>
+                </th>
                 {slotIndices.map((slotIdx) => (
-                  <th key={slotIdx} className="text-center px-6 py-4 border border-slate-400 font-extrabold min-w-[245px] text-slate-950 whitespace-nowrap">
-                    Next-Order {slotIdx + 1}
+                  <th key={slotIdx} className="text-center px-5 py-3.5 border-r border-divider/60 font-bold min-w-[250px] text-secondary whitespace-nowrap">
+                    <div className="inline-flex items-center justify-center gap-1.5 bg-surface/60 border border-divider/80 px-2.5 py-1 rounded-lg">
+                      <span className="text-[10px] font-mono font-bold text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded">
+                        #{slotIdx + 1}
+                      </span>
+                      <span>Next-Order</span>
+                    </div>
                   </th>
                 ))}
-                <th className="text-center px-2 py-2 border border-slate-400 font-extrabold w-[70px] text-slate-950 bg-[#F7CF56]" title="Add extra column to schedule (+ إضافة خانة)">
+                <th className="text-center px-2 py-2 font-bold w-[70px] text-tertiary bg-surface-elevated/40" title="Add extra column to schedule (+ إضافة خانة)">
                   <button
                     type="button"
                     onClick={() => setExtraQueueColumns(prev => prev + 1)}
-                    className="p-1.5 text-slate-900 bg-amber-400/80 hover:bg-amber-400 border border-slate-600/30 rounded-md transition-all cursor-pointer font-bold text-xs flex items-center justify-center mx-auto shadow-xs"
+                    className="p-1.5 text-purple-300 hover:text-white bg-purple-600/20 hover:bg-purple-600 border border-purple-500/30 rounded-lg transition-all cursor-pointer font-bold text-xs flex items-center justify-center mx-auto shadow-xs"
                     title="Add another Next-Order column (+ إضافة خانة)"
                   >
                     <Plus className="w-3.5 h-3.5" />
@@ -2302,8 +2457,6 @@ export default function ProductionOrders() {
             const activeOrder = sequence.length > 0 ? sequence[0] : null;
 
             // Remaining are queued Next-Orders.
-            // If activeOrder is actually 'In Progress' or 'Maintenance', the planned ones are downstream.
-            // If activeOrder is 'Planned' (machine currently idle), it populates Next-Order 1 as well!
             const plannedQueue = (activeOrder && ['In Progress', 'Maintenance'].includes(activeOrder.status))
               ? sequence.slice(1)
               : sequence;
@@ -2335,14 +2488,16 @@ export default function ProductionOrders() {
             const isWorking = activeOrder && activeOrder.status === 'In Progress';
 
             return (
-              <tr key={mach.id} className="hover:bg-surface-elevated/20 transition-all font-medium text-sm text-primary">
+              <tr key={mach.id} className="hover:bg-surface-elevated/25 transition-all font-medium text-sm text-primary">
                 {/* Column A: M */}
-                <td className="text-center px-3 py-3.5 border border-divider bg-surface-elevated/40 font-mono font-bold text-center">
-                  {mach.m}
+                <td className="text-center px-3 py-3 border-r border-divider/60 bg-surface/40 font-mono font-bold">
+                  <span className="inline-flex items-center justify-center w-8 h-8 rounded-xl bg-surface-elevated border border-divider text-primary font-bold text-xs shadow-xs">
+                    {mach.m}
+                  </span>
                 </td>
                 
                 {/* Column B1: Mold Name Details Popup Button */}
-                <td className="text-center px-6 py-4 border border-divider min-w-[180px]">
+                <td className="text-center px-4 py-3 border-r border-divider/60 min-w-[190px]">
                   <button type="button"
                     onClick={() => {
                       const activeOrd = activeOrder;
@@ -2364,85 +2519,89 @@ export default function ProductionOrders() {
                         currentAmps: mach.currentAmps || 32
                       });
                     }}
-                    className="font-bold text-indigo-500 hover:text-indigo-400 update-link transition cursor-pointer flex items-center justify-center w-full focus:outline-none"
+                    className="group inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/25 text-indigo-300 hover:text-indigo-200 transition-all cursor-pointer max-w-[170px] shadow-xs"
                     title="Click to view mold cavity, cycle & hourly speed details"
                   >
-                    <bdi dir="rtl" className="truncate max-w-[140px] block underline">{mach.moldName || `Mould ${mach.name}`}</bdi>
+                    <Settings className="w-3.5 h-3.5 text-indigo-400 group-hover:rotate-45 transition-transform shrink-0" />
+                    <bdi dir="rtl" className="truncate text-xs font-bold font-mono">
+                      {mach.moldName || `Mould ${mach.name}`}
+                    </bdi>
                   </button>
                 </td>
 
                 {/* Column B2: Current Working Order */}
-                <td className="text-center px-4 py-3.5 border border-divider font-semibold text-primary min-w-[210px]">
+                <td className="text-center px-4 py-3 border-r border-divider/60 font-semibold text-primary min-w-[240px]">
                   <div className="flex flex-col items-center justify-center gap-1.5">
                     {isWorking ? (
                       <>
-                        <div className="flex items-center justify-center gap-2 cursor-pointer hover:opacity-80 transition-opacity" onClick={() => setViewingOrder(activeOrder)}>
-                          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse animate-duration-1000 shrink-0"></span>
-                          <bdi dir="rtl" className="block text-primary font-bold text-sm">
+                        <div 
+                          className="flex items-center justify-center gap-2 cursor-pointer hover:text-purple-300 transition-colors" 
+                          onClick={() => setViewingOrder(activeOrder)}
+                        >
+                          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0 shadow-xs shadow-emerald-400/50"></span>
+                          <bdi dir="rtl" className="block text-primary font-bold text-sm line-clamp-1 max-w-[190px]">
                             {activeOrder.itemName}
                           </bdi>
                         </div>
-                        <div className="flex items-center gap-1 text-[11px] font-mono font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 rounded-full shadow-xs">
-                          <span className="text-emerald-500/80 font-medium">Produced:</span>
+                        <div className="inline-flex items-center gap-1.5 text-[11px] font-mono font-bold text-emerald-300 bg-emerald-500/10 border border-emerald-500/25 px-2.5 py-0.5 rounded-full shadow-xs">
+                          <span className="text-emerald-400/80 font-medium text-[10px]">Produced:</span>
                           {activeOrder.isContinuous ? (
                             <span className="text-purple-300 flex items-center gap-1">
                               {getProducedCount(activeOrder).toLocaleString()} {getOrderUnit(activeOrder)} <Infinity className="w-3 h-3 text-purple-400" />
                             </span>
                           ) : (
-                            <span>{getProducedCount(activeOrder).toLocaleString()} / {activeOrder.quantity?.toLocaleString()} {getOrderUnit(activeOrder)}</span>
+                            <span>
+                              {getProducedCount(activeOrder).toLocaleString()} <span className="text-emerald-500/70 font-normal">/ {activeOrder.quantity?.toLocaleString()}</span> {getOrderUnit(activeOrder)}
+                            </span>
                           )}
                         </div>
                       </>
                     ) : isMaintenanceMode ? (
                       <>
-                        <div className="flex items-center justify-center gap-2 cursor-pointer hover:opacity-80 transition-opacity" onClick={() => setViewingOrder(activeOrder)}>
+                        <div className="flex items-center justify-center gap-2 cursor-pointer hover:text-rose-300 transition-colors" onClick={() => setViewingOrder(activeOrder)}>
                           <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0 animate-pulse"></span>
-                          <bdi dir="rtl" className="block text-rose-400 font-bold">
-                            {activeOrder.itemName} <span className="text-xs font-normal text-rose-500/80">(صيانة)</span>
+                          <bdi dir="rtl" className="block text-rose-300 font-bold text-sm">
+                            {activeOrder.itemName} <span className="text-xs font-normal text-rose-400/80">(صيانة)</span>
                           </bdi>
                         </div>
-                        <div className="flex items-center gap-1 text-[11px] font-mono text-rose-300 bg-rose-500/10 border border-rose-500/20 px-2 py-0.5 rounded-full">
+                        <div className="inline-flex items-center gap-1 text-[11px] font-mono text-rose-300 bg-rose-500/10 border border-rose-500/25 px-2.5 py-0.5 rounded-full">
                           <span>Produced: {getProducedCount(activeOrder).toLocaleString()} {getOrderUnit(activeOrder)}</span>
                         </div>
                       </>
                     ) : (
-                      <div className="flex items-center justify-center gap-2">
-                        <span className="w-2 h-2 rounded-full bg-slate-500 shrink-0"></span>
-                        <bdi dir="rtl" className="block text-tertiary font-normal italic">
-                          Idle (جاهز)
-                        </bdi>
+                      <div className="inline-flex items-center justify-center gap-1.5 px-3 py-1 rounded-full bg-surface-elevated/40 border border-divider/60 text-quinary text-xs">
+                        <span className="w-1.5 h-1.5 rounded-full bg-slate-500"></span>
+                        <span className="italic">Idle (جاهز)</span>
                       </div>
                     )}
                   </div>
                 </td>
 
                 {/* Column C: Date */}
-                <td className="text-center px-6 py-4 border border-divider font-bold text-center text-secondary/95 font-mono">
-                  {dateDisplay}
+                <td className="text-center px-4 py-3 border-r border-divider/60 font-semibold text-secondary font-mono text-xs min-w-[125px]">
+                  {dateDisplay !== '-' ? (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-surface-elevated/50 border border-divider/50">
+                      {dateDisplay}
+                    </span>
+                  ) : (
+                    <span className="text-quinary">-</span>
+                  )}
                 </td>
 
                 {/* Column D: TIME */}
-                <td className={`px-6 py-4 border border-divider font-extrabold text-center font-mono transition-all ${
-                  timeDisplay 
-                    ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 font-black animate-pulse' 
-                    : isMaintenanceMode
-                    ? 'bg-rose-500/15 text-rose-400 border-rose-500/35 font-bold'
-                    : 'text-tertiary bg-transparent'
-                }`}>
+                <td className="text-center px-4 py-3 border-r border-divider/60 font-mono text-xs min-w-[125px]">
                   {timeDisplay ? (
-                    <div className="flex items-center justify-center gap-1.5 text-xs">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block"></span>
-                      {timeDisplay}
+                    <div className="inline-flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 font-bold shadow-xs">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                      <span>{timeDisplay}</span>
                     </div>
                   ) : isMaintenanceMode ? (
-                    <div className="flex items-center justify-center gap-1.5 text-xs text-rose-400 font-bold">
-                      <span className="w-1.5 h-1.5 rounded-full bg-rose-500 inline-block animate-pulse"></span>
+                    <div className="inline-flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-lg bg-rose-500/15 border border-rose-500/30 text-rose-300 font-bold">
+                      <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
                       <span>صيانة</span>
                     </div>
                   ) : (
-                    <div className="flex items-center justify-center gap-1.5 text-xs text-slate-400/50 font-normal">
-                      <span>بلا طلبية</span>
-                    </div>
+                    <span className="text-quinary text-xs">-</span>
                   )}
                 </td>
 
@@ -2454,25 +2613,23 @@ export default function ProductionOrders() {
                   return (
                     <td 
                       key={slotIndex} 
-                      className={`px-4 py-3 border border-divider transition-all relative group/cell text-center align-middle ${
-                        hasOrder 
-                          ? 'bg-purple-500/5 hover:bg-purple-500/10 cursor-pointer border-purple-500/30' 
-                          : 'hover:bg-surface-elevated/30 cursor-pointer text-quaternary'
-                      }`}
+                      className="px-3 py-2.5 border-r border-divider/60 relative group/cell text-center align-middle transition-colors hover:bg-surface-elevated/20"
                     >
                       {hasOrder ? (
-                        <div className="relative flex items-center justify-center min-h-[36px] w-full">
-                          {/* Item Details Block - Centered */}
+                        <div className="relative flex items-center justify-center min-h-[42px] w-full">
+                          {/* Item Details Block */}
                           <div 
-                            className="w-full text-center font-bold text-purple-400 hover:text-purple-300 transition-colors flex items-center justify-center px-1"
+                            className="w-full text-center px-3 py-2 rounded-xl bg-purple-500/5 group-hover/cell:bg-purple-500/10 border border-purple-500/20 group-hover/cell:border-purple-500/40 transition-all cursor-pointer shadow-2xs"
                             onClick={() => setViewingOrder(order)}
-                            title={`Click to view full specifications of ${order.itemName}`}
+                            title={`Click to view specifications of ${order.itemName}`}
                           >
-                            <bdi dir="rtl" className="line-clamp-2 block text-center font-bold w-full mx-auto">{order.itemName}</bdi>
+                            <bdi dir="rtl" className="line-clamp-2 block text-center font-bold text-xs text-primary group-hover/cell:text-purple-300 transition-colors">
+                              {order.itemName}
+                            </bdi>
                           </div>
 
-                          {/* Swipe Queue Positioning triggers as absolute floating overlay on hover */}
-                          <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover/cell:opacity-100 transition-all shrink-0 bg-surface/95 backdrop-blur-xs border border-divider rounded-xl px-1.5 py-1 shadow-lg z-10">
+                          {/* Floating Action Controls on Hover */}
+                          <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover/cell:opacity-100 transition-all shrink-0 bg-surface/95 backdrop-blur-md border border-divider/80 rounded-xl px-1.5 py-1 shadow-xl z-10">
                             {slotIndex === 0 && !isWorking && !isMaintenanceMode && (
                               <button type="button" 
                                 onClick={(e) => { e.stopPropagation(); handleStartOrder(order.id, e); }}
@@ -2508,24 +2665,25 @@ export default function ProductionOrders() {
                           </div>
                         </div>
                       ) : (
-                        <div 
+                        <button 
+                          type="button"
                           onClick={() => handleAddDirectQueueOrder(mach.name)}
-                          className="py-1.5 w-full h-full text-[#7F7F7F] text-xs flex items-center justify-center gap-1 group-hover:text-purple-400/80 transition-colors cursor-pointer text-center italic font-normal"
-                          title={`Click to quickly schedule a new production run on ${mach.name}`}
+                          className="w-full py-2 px-2 border border-dashed border-divider/50 hover:border-purple-500/40 rounded-xl text-quinary hover:text-purple-300 hover:bg-purple-500/5 transition-all text-xs flex items-center justify-center gap-1 cursor-pointer font-medium"
+                          title={`Click to schedule next order on ${mach.name}`}
                         >
-                          <Plus className="w-3 h-3 text-quaternary/40 group-hover:text-purple-400/60" />
-                          <span className="text-center">لا توجد طلبية</span>
-                        </div>
+                          <Plus className="w-3 h-3 text-quinary group-hover/cell:text-purple-400" />
+                          <span className="text-[11px]">لا توجد طلبية</span>
+                        </button>
                       )}
                     </td>
                   );
                 })}
                 {/* Column to schedule next order for this machine */}
-                <td className="px-2 py-3 border border-divider text-center bg-surface-elevated/10">
+                <td className="px-2 py-2.5 border-r border-divider/60 text-center bg-surface/20">
                   <button
                     type="button"
                     onClick={() => handleAddDirectQueueOrder(mach.name)}
-                    className="p-1.5 text-quaternary hover:text-purple-400 hover:bg-purple-500/10 rounded-lg transition-colors cursor-pointer inline-flex items-center justify-center"
+                    className="p-1.5 text-quaternary hover:text-purple-300 hover:bg-purple-500/10 rounded-lg transition-all cursor-pointer inline-flex items-center justify-center"
                     title={`Quickly schedule next order for ${mach.name}`}
                   >
                     <Plus className="w-4 h-4" />
@@ -2536,23 +2694,23 @@ export default function ProductionOrders() {
           };
 
           return (
-            <div className="flex-1 overflow-auto bg-surface/10 p-4 space-y-6">
+            <div className="flex-1 overflow-auto bg-surface/10 p-5 space-y-6">
               {/* Queue Depth & Slot Expansion Bar */}
-              <div className="flex flex-wrap items-center justify-between gap-3 bg-surface border border-divider p-3 rounded-xl shadow-xs">
+              <div className="flex flex-wrap items-center justify-between gap-3 bg-gradient-to-r from-purple-500/5 via-surface to-surface border border-divider/80 p-3.5 rounded-2xl shadow-xs">
                 <div className="flex flex-wrap items-center gap-3 text-xs">
-                  <div className="flex items-center gap-1.5 bg-purple-500/10 border border-purple-500/25 px-3 py-1.5 rounded-lg text-purple-300 font-semibold">
+                  <div className="flex items-center gap-2 bg-purple-500/10 border border-purple-500/25 px-3 py-1.5 rounded-xl text-purple-300 font-semibold">
                     <Infinity className="w-4 h-4 text-purple-400" />
-                    <span>Infinite Scheduler: Showing {totalSlotsCount} Next-Order queue columns</span>
+                    <span>Infinite Matrix: Showing {totalSlotsCount} Next-Order queue columns</span>
                   </div>
                   <span className="text-tertiary text-xs">
-                    (Slots automatically expand as you add orders to any machine)
+                    (Columns expand automatically with queued production depth)
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
                     onClick={() => setExtraQueueColumns(prev => prev + 1)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/30 rounded-lg transition cursor-pointer shadow-xs"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/30 rounded-xl transition cursor-pointer shadow-xs"
                     title="Add extra blank column to schedule (+ إضافة خانة بالجدول)"
                   >
                     <Plus className="w-3.5 h-3.5" />
@@ -2562,7 +2720,7 @@ export default function ProductionOrders() {
                     <button
                       type="button"
                       onClick={() => setExtraQueueColumns(0)}
-                      className="px-2.5 py-1.5 text-xs text-tertiary hover:text-primary bg-surface hover:bg-surface-elevated border border-divider rounded-lg transition cursor-pointer"
+                      className="px-2.5 py-1.5 text-xs text-tertiary hover:text-primary bg-surface hover:bg-surface-elevated border border-divider rounded-xl transition cursor-pointer"
                     >
                       Reset Columns
                     </button>
@@ -2572,19 +2730,24 @@ export default function ProductionOrders() {
 
               {/* Active Lines Panel */}
               <div>
-                <div className="flex items-center gap-2 mb-3 bg-emerald-500/10 border border-emerald-500/20 px-4 py-2 rounded-lg max-w-max">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                  <h3 className="text-[11px] font-bold text-emerald-400 uppercase tracking-widest">Active Production Lines ({activeMachines.length})</h3>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 px-3.5 py-1.5 rounded-xl">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <h3 className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
+                      Active Production Lines ({activeMachines.length})
+                    </h3>
+                  </div>
+                  <span className="text-xs text-tertiary">Real-time dynamic cycle timing active</span>
                 </div>
                 {activeMachines.length === 0 ? (
-                  <div className="p-8 text-center text-sm border border-dashed border-divider bg-surface/20 rounded-lg text-tertiary">
+                  <div className="p-8 text-center text-sm border border-dashed border-divider bg-surface/20 rounded-2xl text-tertiary">
                     No active machines currently running production.
                   </div>
                 ) : (
-                  <div className="min-w-max border border-divider rounded-lg overflow-hidden shadow-md bg-canvas">
+                  <div className="min-w-max border border-divider/70 rounded-2xl overflow-hidden shadow-sm bg-surface">
                     <table className="w-full text-center border-collapse">
                       {renderTableHeader()}
-                      <tbody className="divide-y divide-divider font-sans">
+                      <tbody className="divide-y divide-divider/60 font-sans">
                         {activeMachines.map(renderMachineRow)}
                       </tbody>
                     </table>
@@ -2594,19 +2757,24 @@ export default function ProductionOrders() {
 
               {/* Inactive Lines Panel */}
               <div>
-                <div className="flex items-center gap-2 mb-3 bg-slate-500/10 border border-slate-500/20 px-4 py-2 rounded-lg max-w-max">
-                  <span className="w-2 h-2 rounded-full bg-slate-450"></span>
-                  <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Inactive / Idle Production Lines ({inactiveMachines.length})</h3>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2 bg-surface-elevated/70 border border-divider px-3.5 py-1.5 rounded-xl">
+                    <span className="w-2 h-2 rounded-full bg-slate-400"></span>
+                    <h3 className="text-xs font-bold text-secondary uppercase tracking-wider">
+                      Inactive / Idle Lines ({inactiveMachines.length})
+                    </h3>
+                  </div>
+                  <span className="text-xs text-tertiary">Machines ready for new job dispatch</span>
                 </div>
                 {inactiveMachines.length === 0 ? (
-                  <div className="p-8 text-center text-sm border border-dashed border-divider bg-surface/20 rounded-lg text-tertiary">
+                  <div className="p-8 text-center text-sm border border-dashed border-divider bg-surface/20 rounded-2xl text-tertiary">
                     All machines are active. No idle lines.
                   </div>
                 ) : (
-                  <div className="min-w-max border border-divider rounded-lg overflow-hidden shadow-md bg-canvas/30">
+                  <div className="min-w-max border border-divider/70 rounded-2xl overflow-hidden shadow-sm bg-surface/40">
                     <table className="w-full text-center border-collapse">
                       {renderTableHeader()}
-                      <tbody className="divide-y divide-divider font-sans">
+                      <tbody className="divide-y divide-divider/60 font-sans">
                         {inactiveMachines.map(renderMachineRow)}
                       </tbody>
                     </table>
@@ -2615,11 +2783,11 @@ export default function ProductionOrders() {
               </div>
               
               {/* Directives Footer legend */}
-              <div className="mt-4 p-3 bg-surface-elevated/30 rounded-lg border border-divider-subtle max-w-xl text-xs text-tertiary flex items-start gap-2">
-                <span className="text-blue-400 font-bold">🗒️ Dashboard Guide:</span>
-                <p>
-                  Each row lists a Machine. The **Date** and **TIME** show the estimated completion date and time for the active **In Progress** task, which dynamically adjust based on dry cycle time and cavities.
-                  Queued jobs flow sequentially through **Next-Order 1, 2, 3... to infinite depth**. You can add as many orders as needed—new slots appear automatically. Hover over any order cell to reorder or edit!
+              <div className="mt-4 p-3.5 bg-surface-elevated/30 rounded-xl border border-divider-subtle max-w-2xl text-xs text-tertiary flex items-start gap-2.5">
+                <span className="text-purple-400 font-bold">🗒️ Production Guide:</span>
+                <p className="leading-relaxed">
+                  Each row displays a production machine. The **Date** and **TIME** show dynamic estimated completion for the active **In Progress** run, adjusting in real time with cavity and cycle speeds.
+                  Queued jobs flow through **Next-Order #1, #2, #3... to infinite depth**. Hover over any order cell to prioritize or edit!
                 </p>
               </div>
             </div>
@@ -2631,91 +2799,96 @@ export default function ProductionOrders() {
           <div className="overflow-x-auto flex-1">
             <table className="w-full border-collapse">
               <thead>
-                <tr className="border-b border-divider text-[11px] uppercase tracking-widest text-quaternary bg-surface/40">
-                  <th className="text-center px-6 py-4 font-semibold">Order details</th>
-                  <th className="text-center px-6 py-4 font-semibold">Schedule & Status</th>
-                  <th className="text-center px-6 py-4 font-semibold">Materials & Packaging</th>
-                  <th className="text-center px-6 py-4 font-semibold">Machine & Qty</th>
-                  <th className="text-center px-6 py-4 font-semibold">Actions</th>
+                <tr className="border-b border-divider text-[11px] font-bold uppercase tracking-wider text-tertiary bg-surface-elevated/40">
+                  <th className="text-center px-6 py-3.5 font-bold">Order Details</th>
+                  <th className="text-center px-6 py-3.5 font-bold">Schedule & Status</th>
+                  <th className="text-center px-6 py-3.5 font-bold">Materials & Packaging</th>
+                  <th className="text-center px-6 py-3.5 font-bold">Machine & Output</th>
+                  <th className="text-center px-6 py-3.5 font-bold">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-white/5 bg-transparent">
+              <tbody className="divide-y divide-divider/60 bg-transparent">
                 {getActiveOrdersList().length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-6 py-12 text-center text-tertiary">
-                      <PackageSearch className="w-8 h-8 mx-auto mb-3 text-divider-strong" />
-                      No active planned production orders found matching your criteria.
+                    <td colSpan={5} className="px-6 py-14 text-center text-tertiary">
+                      <div className="flex flex-col items-center justify-center max-w-sm mx-auto">
+                        <PackageSearch className="w-9 h-9 mb-3 text-divider-strong" />
+                        <p className="font-semibold text-secondary text-sm">No Active Production Orders</p>
+                        <p className="text-xs text-tertiary mt-1">No active or planned orders matching your filters were found.</p>
+                      </div>
                     </td>
                   </tr>
                 ) : (
                   getActiveOrdersList().map((order) => {
                     return (
-                      <tr key={order.id} className="hover:bg-surface-elevated/30 transition-colors group">
+                      <tr key={order.id} className="hover:bg-surface-elevated/25 transition-colors group">
                         <td className="text-center px-6 py-4">
                           <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-lg bg-surface-elevated flex items-center justify-center shrink-0 border border-divider-subtle">
+                            <div className="w-10 h-10 rounded-xl bg-surface-elevated flex items-center justify-center shrink-0 border border-divider-subtle shadow-xs">
                               {getStatusIcon(order.status)}
                             </div>
-                            <div>
-                              <div className="font-medium text-primary cursor-pointer hover:text-purple-400 focus:outline-none shrink-0 line-clamp-1 flex items-center gap-2" onClick={() => setViewingOrder(order)}>
+                            <div className="text-left">
+                              <div className="font-bold text-primary cursor-pointer hover:text-purple-400 focus:outline-none shrink-0 line-clamp-1 flex items-center gap-2" onClick={() => setViewingOrder(order)}>
                                 <bdi dir="rtl" className="block">{order.itemName}</bdi>
                               </div>
-                              <div className="text-xs text-secondary mt-0.5 font-mono">
+                              <div className="text-xs text-tertiary mt-0.5 font-mono">
                                 {order.id}
                               </div>
                             </div>
                           </div>
                         </td>
                         <td className="text-center px-6 py-4">
-                           <div className="flex flex-col gap-2">
-                            <span className={`inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-medium border w-fit ${getStatusStyle(order.status)}`}>
+                          <div className="flex flex-col items-center gap-1.5">
+                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${getStatusStyle(order.status)}`}>
                               {order.status}
                             </span>
-                            <span className="text-xs text-tertiary flex items-center gap-1">
+                            <span className="text-xs text-tertiary flex items-center gap-1 font-mono">
                               <Calendar className="w-3 h-3" /> {order.startDate} to {order.endDate}
                             </span>
                           </div>
                         </td>
                         <td className="text-center px-6 py-4">
-                          <div className="text-sm text-secondary truncate max-w-[200px]" title={order.granulesType}>
+                          <div className="text-sm text-secondary truncate max-w-[200px] mx-auto font-medium" title={order.granulesType}>
                             <bdi dir="rtl" className="block">{order.granulesType}</bdi>
                           </div>
-                          <div className="text-xs text-tertiary mt-1 truncate max-w-[200px]" title={order.packagingDetails}>
+                          <div className="text-xs text-tertiary mt-1 truncate max-w-[200px] mx-auto" title={order.packagingDetails}>
                             <bdi dir="rtl" className="block">{order.packagingDetails}</bdi>
                           </div>
                         </td>
                         <td className="text-center px-6 py-4">
-                          <div className="text-sm text-secondary flex items-center gap-1.5 truncate max-w-[150px]">
+                          <div className="text-sm font-semibold text-secondary flex items-center justify-center gap-1.5 truncate max-w-[170px] mx-auto">
                             <Settings className="w-3.5 h-3.5 text-tertiary" /> {order.assignedMachine}
                           </div>
                           <div className="text-xs text-tertiary mt-1 font-medium">
                             {order.isContinuous ? (
-                              <span className="text-purple-400 font-bold flex items-center gap-1">
+                              <span className="text-purple-400 font-bold flex items-center justify-center gap-1">
                                 <Infinity className="w-3.5 h-3.5" /> Continuous (∞)
                               </span>
                             ) : (
                               `${order.quantity.toLocaleString()} ${getOrderUnit(order)}`
                             )}
                           </div>
-                          <div className="max-w-[200px]">
+                          <div className="max-w-[200px] mx-auto mt-1">
                             <ProductionProgressBar order={order} />
                           </div>
                         </td>
                         <td className="text-center px-6 py-4">
-                          <div className="flex justify-center gap-1">
+                          <div className="flex justify-center items-center gap-1">
                             {!isViewer && (
                               <>
                                 <button type="button" 
                                   onClick={() => openOrderModal(order)}
-                                  className="p-2 hover:bg-surface-elevated rounded-lg text-tertiary hover:text-secondary opacity-0 group-hover:opacity-100 transition-all focus:opacity-100 focus:outline-none"
+                                  className="p-2 hover:bg-surface-elevated rounded-xl text-tertiary hover:text-primary opacity-0 group-hover:opacity-100 transition-all focus:opacity-100 cursor-pointer"
                                   aria-label="Edit Order"
+                                  title="Edit Order"
                                 >
                                   <Pencil className="w-4 h-4" />
                                 </button>
                                 <button type="button" 
                                   onClick={(e) => handleDeleteOrder(order.id, e)}
-                                  className="p-2 hover:bg-red-500/10 rounded-lg text-tertiary hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all focus:opacity-100 focus:outline-none"
+                                  className="p-2 hover:bg-rose-500/10 rounded-xl text-tertiary hover:text-rose-400 opacity-0 group-hover:opacity-100 transition-all focus:opacity-100 cursor-pointer"
                                   aria-label="Delete Order"
+                                  title="Delete Order"
                                 >
                                   <Trash2 className="w-4 h-4" />
                                 </button>
@@ -2737,90 +2910,95 @@ export default function ProductionOrders() {
           <div className="overflow-x-auto flex-1">
             <table className="w-full border-collapse">
               <thead>
-                <tr className="border-b border-divider text-[11px] uppercase tracking-widest text-quaternary bg-surface/40">
-                  <th className="text-center px-6 py-4 font-semibold">Order details</th>
-                  <th className="text-center px-6 py-4 font-semibold">Schedule & Status</th>
-                  <th className="text-center px-6 py-4 font-semibold">Materials & Packaging</th>
-                  <th className="text-center px-6 py-4 font-semibold">Machine & Qty</th>
-                  <th className="text-center px-6 py-4 font-semibold">Actions</th>
+                <tr className="border-b border-divider text-[11px] font-bold uppercase tracking-wider text-tertiary bg-surface-elevated/40">
+                  <th className="text-center px-6 py-3.5 font-bold">Order Details</th>
+                  <th className="text-center px-6 py-3.5 font-bold">Schedule & Status</th>
+                  <th className="text-center px-6 py-3.5 font-bold">Materials & Packaging</th>
+                  <th className="text-center px-6 py-3.5 font-bold">Machine & Output</th>
+                  <th className="text-center px-6 py-3.5 font-bold">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-white/5 bg-transparent">
+              <tbody className="divide-y divide-divider/60 bg-transparent">
                 {getArchiveOrdersList().length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-6 py-12 text-center text-tertiary">
-                      <PackageSearch className="w-8 h-8 mx-auto mb-3 text-divider-strong" />
-                      No completed or cancelled orders archived.
+                    <td colSpan={5} className="px-6 py-14 text-center text-tertiary">
+                      <div className="flex flex-col items-center justify-center max-w-sm mx-auto">
+                        <PackageSearch className="w-9 h-9 mb-3 text-divider-strong" />
+                        <p className="font-semibold text-secondary text-sm">No Archived Orders</p>
+                        <p className="text-xs text-tertiary mt-1">No completed or cancelled orders in the historical archive.</p>
+                      </div>
                     </td>
                   </tr>
                 ) : (
                   getArchiveOrdersList().map((order) => (
-                    <tr key={order.id} className="hover:bg-surface-elevated/30 transition-colors group">
+                    <tr key={order.id} className="hover:bg-surface-elevated/25 transition-colors group">
                       <td className="text-center px-6 py-4">
                         <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-lg bg-surface-elevated flex items-center justify-center shrink-0 border border-divider-subtle">
+                          <div className="w-10 h-10 rounded-xl bg-surface-elevated flex items-center justify-center shrink-0 border border-divider-subtle shadow-xs">
                             {getStatusIcon(order.status)}
                           </div>
-                          <div>
-                            <div className="font-medium text-primary cursor-pointer hover:text-purple-400 focus:outline-none shrink-0 line-clamp-1" onClick={() => setViewingOrder(order)}>
+                          <div className="text-left">
+                            <div className="font-bold text-primary cursor-pointer hover:text-purple-400 focus:outline-none shrink-0 line-clamp-1" onClick={() => setViewingOrder(order)}>
                               <bdi dir="rtl" className="block">{order.itemName}</bdi>
                             </div>
-                            <div className="text-xs text-secondary mt-0.5 font-mono">
+                            <div className="text-xs text-tertiary mt-0.5 font-mono">
                               {order.id}
                             </div>
                           </div>
                         </div>
                       </td>
                       <td className="text-center px-6 py-4">
-                         <div className="flex flex-col gap-2">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-medium border w-fit ${getStatusStyle(order.status)}`}>
+                        <div className="flex flex-col items-center gap-1.5">
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${getStatusStyle(order.status)}`}>
                             {order.status}
                           </span>
-                          <span className="text-xs text-tertiary flex items-center gap-1">
+                          <span className="text-xs text-tertiary flex items-center gap-1 font-mono">
                             <Calendar className="w-3 h-3" /> {order.startDate} to {order.endDate}
                           </span>
                         </div>
                       </td>
                       <td className="text-center px-6 py-4">
-                        <div className="text-sm text-secondary truncate max-w-[200px]" title={order.granulesType}>
+                        <div className="text-sm font-medium text-secondary truncate max-w-[200px] mx-auto" title={order.granulesType}>
                           <bdi dir="rtl" className="block">{order.granulesType}</bdi>
                         </div>
-                        <div className="text-xs text-tertiary mt-1 truncate max-w-[200px]" title={order.packagingDetails}>
+                        <div className="text-xs text-tertiary mt-1 truncate max-w-[200px] mx-auto" title={order.packagingDetails}>
                           <bdi dir="rtl" className="block">{order.packagingDetails}</bdi>
                         </div>
                       </td>
                       <td className="text-center px-6 py-4">
-                        <div className="text-sm text-secondary flex items-center gap-1.5 truncate max-w-[150px]">
+                        <div className="text-sm font-semibold text-secondary flex items-center justify-center gap-1.5 truncate max-w-[170px] mx-auto">
                           <Settings className="w-3.5 h-3.5 text-tertiary" /> {order.assignedMachine}
                         </div>
                         <div className="text-xs text-tertiary mt-1 font-medium">
                           {order.isContinuous ? (
-                            <span className="text-purple-400 font-bold flex items-center gap-1">
+                            <span className="text-purple-400 font-bold flex items-center justify-center gap-1">
                               <Infinity className="w-3.5 h-3.5" /> Continuous (∞)
                             </span>
                           ) : (
                             `${order.quantity.toLocaleString()} ${getOrderUnit(order)}`
                           )}
                         </div>
-                        <div className="max-w-[200px]">
+                        <div className="max-w-[200px] mx-auto mt-1">
                           <ProductionProgressBar order={order} />
                         </div>
                       </td>
                       <td className="text-center px-6 py-4">
-                        <div className="flex justify-center gap-1">
+                        <div className="flex justify-center items-center gap-1">
                           {!isViewer && (
                             <>
                               <button type="button" 
                                 onClick={() => openOrderModal(order)}
-                                className="p-2 hover:bg-surface-elevated rounded-lg text-tertiary hover:text-secondary opacity-0 group-hover:opacity-100 transition-all focus:opacity-100 focus:outline-none"
+                                className="p-2 hover:bg-surface-elevated rounded-xl text-tertiary hover:text-primary opacity-0 group-hover:opacity-100 transition-all focus:opacity-100 cursor-pointer"
                                 aria-label="Edit Order"
+                                title="Edit Order"
                               >
                                 <Pencil className="w-4 h-4" />
                               </button>
                               <button type="button" 
                                 onClick={(e) => handleDeleteOrder(order.id, e)}
-                                className="p-2 hover:bg-red-500/10 rounded-lg text-tertiary hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all focus:opacity-100 focus:outline-none"
+                                className="p-2 hover:bg-rose-500/10 rounded-xl text-tertiary hover:text-rose-400 opacity-0 group-hover:opacity-100 transition-all focus:opacity-100 cursor-pointer"
                                 aria-label="Delete Order"
+                                title="Delete Order"
                               >
                                 <Trash2 className="w-4 h-4" />
                               </button>
