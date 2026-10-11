@@ -51,7 +51,8 @@ import {
   ChevronDown,
   ChevronRight,
   Wrench,
-  RefreshCw
+  RefreshCw,
+  FileSpreadsheet
 } from 'lucide-react';
 
 export type ProductionOrder = {
@@ -2558,49 +2559,64 @@ export default function ProductionOrders() {
         </div>
 
         {/* Action Toolbar */}
-        <div className="flex flex-wrap items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
           <button type="button" 
             onClick={() => setIsBatchModalOpen(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white rounded-xl text-xs font-semibold transition-all shadow-sm shadow-amber-600/20 cursor-pointer"
+            className="group flex items-center gap-2 px-3.5 py-2 bg-amber-500/10 hover:bg-amber-500/15 text-amber-300 hover:text-amber-200 border border-amber-500/25 hover:border-amber-500/40 rounded-xl text-xs font-medium transition-all duration-200 shadow-xs hover:shadow-amber-500/10 active:scale-[0.98] cursor-pointer"
             title="Bulk update machine cycles, cavities, and bottles/hr rates via copy & paste or one-button batch updater"
           >
-            <Sparkles className="w-3.5 h-3.5 text-yellow-200" />
+            <div className="w-5 h-5 rounded-lg bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 group-hover:rotate-12 transition-transform">
+              <Sparkles className="w-3 h-3" />
+            </div>
             <span>Batch Speeds & Cavities</span>
-            <span className="text-[10px] bg-black/25 px-1.5 py-0.5 rounded font-mono">Batch</span>
+            <span className="text-[10px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/30 font-mono">
+              Batch
+            </span>
           </button>
 
           <button type="button" 
             onClick={() => setIsMachineSetupOpen(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-surface hover:bg-surface-elevated text-secondary hover:text-primary border border-divider rounded-xl text-xs font-semibold transition-all cursor-pointer shadow-xs"
+            className="group flex items-center gap-2 px-3.5 py-2 bg-surface-elevated/60 hover:bg-blue-500/10 text-secondary hover:text-blue-300 border border-divider hover:border-blue-500/30 rounded-xl text-xs font-medium transition-all duration-200 shadow-xs hover:shadow-blue-500/10 active:scale-[0.98] cursor-pointer"
           >
-            <Sliders className="w-3.5 h-3.5 text-blue-400" />
+            <div className="w-5 h-5 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 group-hover:scale-110 transition-transform">
+              <Sliders className="w-3 h-3" />
+            </div>
             <span>Machines Setup</span>
           </button>
           
           <button type="button" 
             onClick={handleExportAllOrders}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-surface hover:bg-surface-elevated text-secondary hover:text-primary border border-divider rounded-xl text-xs font-semibold transition-all cursor-pointer shadow-xs"
+            className="group flex items-center gap-2 px-3.5 py-2 bg-surface-elevated/60 hover:bg-surface-elevated text-secondary hover:text-primary border border-divider hover:border-slate-500/40 rounded-xl text-xs font-medium transition-all duration-200 shadow-xs active:scale-[0.98] cursor-pointer"
             title="Export all production orders and details to Excel"
           >
-            <Download className="w-3.5 h-3.5 text-tertiary" />
+            <div className="w-5 h-5 rounded-lg bg-surface border border-divider flex items-center justify-center text-tertiary group-hover:text-primary transition-colors">
+              <Download className="w-3 h-3" />
+            </div>
             <span>Export Details</span>
           </button>
           
           <button type="button" 
             onClick={handleExportMatrixExcel}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold transition-all shadow-sm shadow-emerald-600/20 cursor-pointer"
+            className="group flex items-center gap-2 px-3.5 py-2 bg-emerald-500/10 hover:bg-emerald-500/15 text-emerald-300 hover:text-emerald-200 border border-emerald-500/25 hover:border-emerald-500/40 rounded-xl text-xs font-medium transition-all duration-200 shadow-xs hover:shadow-emerald-500/10 active:scale-[0.98] cursor-pointer"
             title="Download Spreadsheet Matrix in Excel (.xlsx) exactly as displayed"
           >
-            <Download className="w-3.5 h-3.5" />
-            <span>Export Grid (Excel)</span>
+            <div className="w-5 h-5 rounded-lg bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 group-hover:scale-110 transition-transform">
+              <FileSpreadsheet className="w-3 h-3" />
+            </div>
+            <span>Export Grid</span>
+            <span className="text-[10px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-mono">
+              Excel
+            </span>
           </button>
 
           {!isViewer && (
             <button type="button" 
               onClick={() => openOrderModal()}
-              className="flex items-center gap-1.5 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-semibold transition-all shadow-sm shadow-purple-600/25 cursor-pointer"
+              className="group flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-600 hover:from-purple-500 hover:via-indigo-500 hover:to-purple-500 text-white rounded-xl text-xs font-semibold transition-all duration-200 shadow-md shadow-purple-600/30 hover:shadow-purple-600/50 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98] border border-purple-400/30 cursor-pointer"
             >
-              <Plus className="w-4 h-4" />
+              <div className="w-5 h-5 rounded-lg bg-white/20 flex items-center justify-center text-white group-hover:rotate-90 transition-transform duration-200">
+                <Plus className="w-3.5 h-3.5" />
+              </div>
               <span>New Order / Entry</span>
             </button>
           )}
