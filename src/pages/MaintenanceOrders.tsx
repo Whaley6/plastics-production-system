@@ -301,17 +301,7 @@ const MaintenanceOrderEditor = ({
       <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-5 flex-1">
         
         {/* Core Attributes */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div>
-            <label className="block text-xs font-semibold text-secondary mb-1.5">Order ID</label>
-            <input 
-              type="text" 
-              value={docId} 
-              onChange={e => setDocId(e.target.value)} 
-              required
-              className="w-full px-3.5 py-2 bg-canvas border border-divider rounded-xl text-xs text-primary focus:border-blue-500 outline-none transition" 
-            />
-          </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-xs font-semibold text-secondary mb-1.5">Status</label>
             <select 
@@ -386,7 +376,7 @@ const MaintenanceOrderEditor = ({
         </div>
 
         {/* Personnel & Date */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-xs font-semibold text-secondary mb-1.5">Reported By</label>
             <input 
@@ -394,16 +384,6 @@ const MaintenanceOrderEditor = ({
               value={requestedBy} 
               onChange={e => setRequestedBy(e.target.value)} 
               placeholder="Operator / Reporter"
-              className="w-full px-3.5 py-2 bg-canvas border border-divider rounded-xl text-xs text-primary focus:border-blue-500 outline-none transition placeholder:text-tertiary/60" 
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-secondary mb-1.5">Assigned Technician</label>
-            <input 
-              type="text" 
-              value={assignedTo} 
-              onChange={e => setAssignedTo(e.target.value)} 
-              placeholder="Lead Maintenance Tech"
               className="w-full px-3.5 py-2 bg-canvas border border-divider rounded-xl text-xs text-primary focus:border-blue-500 outline-none transition placeholder:text-tertiary/60" 
             />
           </div>
@@ -715,11 +695,15 @@ const ProcurementOrderEditor = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const relatedWO = workOrders.find(wo => wo.id === workOrderId);
+    const resolvedTitle = (items.length > 0 && items[0].name?.trim())
+      ? items[0].name.trim()
+      : (taskName.trim() || initialOrder?.taskName || 'Parts Requisition');
+
     onSave({
       id: docId.trim(),
-      taskName: taskName.trim() || (items.length > 0 ? items[0].name : 'Procurement Request'),
-      workOrderId: workOrderId || undefined,
-      machineName: relatedWO ? relatedWO.machineName : '',
+      taskName: resolvedTitle,
+      workOrderId: workOrderId || initialOrder?.workOrderId || undefined,
+      machineName: initialOrder?.machineName || (relatedWO ? relatedWO.machineName : ''),
       status,
       requestedBy: requestedBy.trim(),
       assignedTo: assignedTo.trim(),
@@ -751,16 +735,6 @@ const ProcurementOrderEditor = ({
       <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-5 flex-1">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
-            <label className="block text-xs font-semibold text-secondary mb-1.5">Document ID</label>
-            <input 
-              type="text" 
-              value={docId} 
-              onChange={e => setDocId(e.target.value)} 
-              required 
-              className="w-full px-3.5 py-2 bg-canvas border border-divider rounded-xl text-xs text-primary focus:border-blue-500 outline-none transition" 
-            />
-          </div>
-          <div>
             <label className="block text-xs font-semibold text-secondary mb-1.5">Status</label>
             <select 
               value={status} 
@@ -773,32 +747,6 @@ const ProcurementOrderEditor = ({
               <option value="In Transit">In Transit</option>
               <option value="Finished">Finished / Received</option>
             </select>
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-secondary mb-1.5">Related Work Order</label>
-            <select 
-              value={workOrderId} 
-              onChange={e => setWorkOrderId(e.target.value)} 
-              className="w-full px-3.5 py-2 bg-canvas border border-divider rounded-xl text-xs text-primary focus:border-blue-500 outline-none transition"
-            >
-              <option value="">None (Independent Request)</option>
-              {workOrders.map((w) => (
-                <option key={w.id} value={w.id}>{w.id} - {w.taskName || w.machineName}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div>
-            <label className="block text-xs font-semibold text-secondary mb-1.5">Parts Requisition Title</label>
-            <input 
-              type="text" 
-              value={taskName} 
-              onChange={e => setTaskName(e.target.value)} 
-              placeholder="e.g. Hydraulic Seals & O-Rings Kit"
-              className="w-full px-3.5 py-2 bg-canvas border border-divider rounded-xl text-xs text-primary focus:border-blue-500 outline-none transition placeholder:text-tertiary/60" 
-            />
           </div>
           <div>
             <label className="block text-xs font-semibold text-secondary mb-1.5">Requested By</label>
