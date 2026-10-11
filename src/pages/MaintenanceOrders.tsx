@@ -3,6 +3,7 @@ import ExcelJS from 'exceljs';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { useAuth } from '../hooks/useAuth';
+import { useNotifications } from '../hooks/useNotifications';
 import { defaultRoles } from './Roles';
 import { logAction } from '../utils/logger';
 import { formatDistanceToNow } from 'date-fns';
@@ -711,6 +712,8 @@ const TimeElapsedCounter = ({ dateString, endDateString, isFinished }: { dateStr
 };
 
 export default function MaintenanceOrders() {
+  const { user } = useAuth();
+  const { sendNotification } = useNotifications();
   const isViewer = false;
   const [activeTab, setActiveTab] = useState<'Maintenance' | 'Procurement'>('Maintenance');
   const [workOrders, setWorkOrders] = useLocalStorage<WorkOrder[]>('maintenance_work_orders', INITIAL_MAINTENANCE_WORK_ORDERS);
@@ -766,6 +769,8 @@ export default function MaintenanceOrders() {
 
   const handleCheckItem = (moId: string, itemId: string) => {
     const newDate = new Date().toISOString();
+    const wo = workOrders.find(w => w.id === moId);
+    const item = wo?.items?.find(it => it.id === itemId);
     setWorkOrders(workOrders.map((wo) => {
       if (wo.id === moId && wo.items) {
         return {
@@ -782,9 +787,21 @@ export default function MaintenanceOrders() {
         items: viewingOrder.items?.map((it: any) => it.id === itemId ? { ...it, lastChecked: newDate } : it)
       } as WorkOrder);
     }
+
+    sendNotification({
+      title: 'Checklist Item Checked',
+      message: `${user?.name || user?.username || 'An account'} checked "${item?.name || item?.description || 'item'}" on ${wo?.machineName || wo?.id || 'work order'}.`,
+      type: 'item_checked',
+      priority: 'normal',
+      targetUsername: 'all',
+      link: 'maintenance',
+      metadata: { orderId: moId, checkItemName: item?.name || item?.description, machineId: wo?.machineName }
+    });
   };
 
   const handleCompleteItem = (moId: string, itemId: string) => {
+    const wo = workOrders.find(w => w.id === moId);
+    const item = wo?.items?.find(it => it.id === itemId);
     setWorkOrders(workOrders.map((wo) => {
       if (wo.id === moId && wo.items) {
         const newItems = wo.items.map(it => it.id === itemId ? { ...it, state: 'Completed', dateCompleted: new Date().toISOString() } : it);
@@ -804,6 +821,15 @@ export default function MaintenanceOrders() {
     }
     
     logAction('Item Completed', `Item ${itemId} in Maintenance Order ${moId} marked as completed.`, 'success');
+    sendNotification({
+      title: 'Maintenance Item Completed',
+      message: `"${item?.name || item?.description || 'item'}" on ${wo?.machineName || wo?.id || 'work order'} was marked completed.`,
+      type: 'item_checked',
+      priority: 'normal',
+      targetUsername: 'all',
+      link: 'maintenance',
+      metadata: { orderId: moId, checkItemName: item?.name || item?.description, machineId: wo?.machineName }
+    });
   };
 
   const handleCompletePOItem = (poId: string, itemId: string) => {
@@ -843,6 +869,16 @@ export default function MaintenanceOrders() {
         lastChecked: newDate
       } as ProcurementOrder);
     }
+
+    sendNotification({
+      title: 'Procurement Order Checked',
+      message: `${user?.name || user?.username || 'An account'} checked procurement order ${poId}.`,
+      type: 'item_checked',
+      priority: 'normal',
+      targetUsername: 'all',
+      link: 'maintenance',
+      metadata: { orderId: poId }
+    });
   };
 
   const handleSaveMO = (doc: WorkOrder) => {
@@ -854,9 +890,27 @@ export default function MaintenanceOrders() {
     if (editingOrder) {
       logAction('Work Order Updated', `Maintenance order ${doc.id} was updated.`, 'info');
       setWorkOrders(workOrders.map(wo => wo.id === editingOrder.id ? doc : wo));
+      sendNotification({
+        title: 'Maintenance Order Updated',
+        message: `Maintenance order ${doc.id} (${doc.machineName}) was updated (Status: ${doc.status}).`,
+        type: 'order_updated',
+        priority: 'normal',
+        targetUsername: 'all',
+        link: 'maintenance',
+        metadata: { orderId: doc.id, machineId: doc.machineName }
+      });
     } else {
       logAction('Work Order Created', `Maintenance order ${doc.id} was created.`, 'success');
       setWorkOrders([doc, ...workOrders]);
+      sendNotification({
+        title: 'New Maintenance Order Added',
+        message: `${doc.taskName || 'Maintenance Order'} created for ${doc.machineName} (${doc.priority} Priority).`,
+        type: 'order_created',
+        priority: doc.priority === 'Critical' ? 'urgent' : doc.priority === 'High' ? 'high' : 'normal',
+        targetUsername: 'all',
+        link: 'maintenance',
+        metadata: { orderId: doc.id, machineId: doc.machineName }
+      });
     }
     setIsCreatingOrder(false);
     setEditingOrder(null);
@@ -878,10 +932,28 @@ export default function MaintenanceOrders() {
       const changeDetails = changes.map(k => `${k}: ${(editingOrder as any)[k]} -> ${updatedPO[k]}`).join(', ');
       logAction('Procurement Order Updated', `Procurement order ${editingOrder.id} was updated.${changeDetails ? ` Changes: ${changeDetails}` : ''}`, 'info');
       setProcurementOrders(procurementOrders.map(po => po.id === editingOrder.id ? updatedPO as ProcurementOrder : po));
+      sendNotification({
+        title: 'Procurement Order Updated',
+        message: `Procurement order ${editingOrder.id} was updated (Status: ${updatedPO.status}).`,
+        type: 'order_updated',
+        priority: 'normal',
+        targetUsername: 'all',
+        link: 'maintenance',
+        metadata: { orderId: editingOrder.id }
+      });
     } else {
       const detailsArray = Object.entries(updatedPO).filter(([k,v]) => v !== undefined && k !== 'id').map(([k,v]) => `${k}: ${v}`).join(', ');
       logAction('Procurement Order Created', `Procurement order ${updatedPO.id} was created. Added: ${detailsArray}`, 'success');
       setProcurementOrders([updatedPO as ProcurementOrder, ...procurementOrders]);
+      sendNotification({
+        title: 'New Procurement Request Added',
+        message: `Parts request for ${updatedPO.taskName || updatedPO.sparePart || 'item'} (${updatedPO.priority || 'Normal'} Priority).`,
+        type: 'order_created',
+        priority: updatedPO.priority === 'Critical' ? 'urgent' : updatedPO.priority === 'High' ? 'high' : 'normal',
+        targetUsername: 'all',
+        link: 'maintenance',
+        metadata: { orderId: updatedPO.id }
+      });
     }
     setIsCreatingOrder(false);
     setEditingOrder(null);

@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { useAuth } from '../hooks/useAuth';
+import { useNotifications } from '../hooks/useNotifications';
 import { defaultRoles } from './Roles';
 import { logAction } from '../utils/logger';
 import ExcelJS from 'exceljs';
@@ -209,6 +210,7 @@ export const INITIAL_CNC_TICKETS: CncTicket[] = [
 
 export default function CncMoldTickets() {
   const { user } = useAuth();
+  const { sendNotification } = useNotifications();
   const [roles] = useLocalStorage<any[]>('app_roles', defaultRoles);
   const currentRole = roles.find((r: any) => r.id === user?.role) || defaultRoles.find((r: any) => r.id === user?.role) || defaultRoles[0];
   const isReadOnly = currentRole?.permissions?.cnc_readonly === true;
@@ -597,6 +599,15 @@ export default function CncMoldTickets() {
       // If we are editing, we should map based on the original ID, not the new one
       if (editingTicket) {
         logAction('CNC Ticket Updated', `Updated CNC Ticket ${formId} (${formMoldName})`, 'info');
+        sendNotification({
+          title: 'CNC Mold Ticket Updated',
+          message: `Ticket ${formId} (${formMoldName}) updated to status "${formState}".`,
+          type: 'order_updated',
+          priority: 'normal',
+          targetUsername: 'all',
+          link: 'cnc',
+          metadata: { orderId: formId }
+        });
         return prev.map(item => item.id === editingTicket.id ? updatedData : item);
       } else if (exists) {
         // If it already exists and we are not explicitly editing it, overwrite it
@@ -604,6 +615,15 @@ export default function CncMoldTickets() {
         return prev.map(item => item.id === formId ? updatedData : item);
       } else {
         logAction('CNC Ticket Created', `Created CNC Ticket ${formId} (${formMoldName})`, 'success');
+        sendNotification({
+          title: 'New CNC Mold Ticket',
+          message: `New ticket ${formId} for mold "${formMoldName}" on machine "${formMachineNumber || 'CNC'}".`,
+          type: 'order_created',
+          priority: 'normal',
+          targetUsername: 'all',
+          link: 'cnc',
+          metadata: { orderId: formId }
+        });
         return [updatedData, ...prev];
       }
     });

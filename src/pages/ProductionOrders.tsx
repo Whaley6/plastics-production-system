@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { useAuth } from '../hooks/useAuth';
+import { useNotifications } from '../hooks/useNotifications';
 import { defaultRoles } from './Roles';
 import { logAction } from '../utils/logger';
 import ExcelJS from 'exceljs';
@@ -847,6 +848,7 @@ export const INITIAL_PRODUCTION_ORDERS: ProductionOrder[] = [
 
 export default function ProductionOrders() {
   const { user } = useAuth();
+  const { sendNotification } = useNotifications();
   const [roles] = useLocalStorage<any[]>('app_roles', defaultRoles);
   const currentRole = roles.find((r: any) => r.id === user?.role) || defaultRoles.find((r: any) => r.id === user?.role) || defaultRoles[0];
   const isReadOnly = currentRole?.permissions?.production_readonly === true;
@@ -1037,6 +1039,15 @@ export default function ProductionOrders() {
     }));
     setViewingOrder(prev => prev && prev.id === orderId ? { ...prev, status: 'In Progress', actualStartTime: nowIso } : prev);
     logAction('Production Order Started', `Order ${orderId} has started running.`, 'success');
+    sendNotification({
+      title: 'Order Started Production',
+      message: `Order ${orderId} is now In Progress.`,
+      type: 'order_updated',
+      priority: 'normal',
+      targetUsername: 'all',
+      link: 'production',
+      metadata: { orderId }
+    });
   };
 
   const handlePauseOrder = (orderId: string, e?: React.MouseEvent) => {
@@ -1121,6 +1132,15 @@ export default function ProductionOrders() {
     });
     setViewingOrder(prev => prev && prev.id === orderId ? updatedOrder : prev);
     logAction('Production Order Completed', `Order ${orderId} (${order.itemName}) marked as completed with ${finalProduced.toLocaleString()} units.`, 'success');
+    sendNotification({
+      title: 'Order Completed',
+      message: `Order ${orderId} (${order.itemName}) finished with ${finalProduced.toLocaleString()} ${getOrderUnit(order)} on ${order.assignedMachine}.`,
+      type: 'order_updated',
+      priority: 'normal',
+      targetUsername: 'all',
+      link: 'production',
+      metadata: { orderId, machineId: order.assignedMachine }
+    });
   };
 
   // Calculate expected end date & time based on quantity, cycle time, cavities
@@ -1474,6 +1494,15 @@ export default function ProductionOrders() {
        };
        setOrders(prev => prev.map(order => order.id === editingOrder.id ? updatedOrder : order));
        logAction('Production Order Updated', `Order ${editingOrder.id} (${updatedOrder.itemName}) was updated with cycle: ${updatedOrder.cycleTime}s, cav: ${updatedOrder.cavities}.`, 'info');
+       sendNotification({
+         title: 'Production Order Updated',
+         message: `Order ${editingOrder.id} (${updatedOrder.itemName}) was updated on ${updatedOrder.assignedMachine}.`,
+         type: 'order_updated',
+         priority: 'normal',
+         targetUsername: 'all',
+         link: 'production',
+         metadata: { orderId: editingOrder.id, machineId: updatedOrder.assignedMachine }
+       });
     } else {
       const machPlannedOrders = orders.filter(o => o.assignedMachine === assignedMach && o.status === 'Planned');
       let effectiveStartDate = new Date().toISOString();
@@ -1515,6 +1544,15 @@ export default function ProductionOrders() {
       };
       setOrders(prev => [newOrder, ...prev]);
       logAction('Production Order Created', `Order ${newId} (${newOrder.itemName}) was created for ${assignedMach}.`, 'success');
+      sendNotification({
+        title: 'New Production Order Added',
+        message: `${newOrder.itemName} (${newOrder.quantity.toLocaleString()} ${newOrder.unit}) scheduled on ${assignedMach}.`,
+        type: 'order_created',
+        priority: 'normal',
+        targetUsername: 'all',
+        link: 'production',
+        metadata: { orderId: newId, machineId: assignedMach }
+      });
     }
     
     setIsCreatingOrder(false);
