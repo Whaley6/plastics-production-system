@@ -6,6 +6,7 @@ import { defaultRoles } from './Roles';
 import { logAction } from '../utils/logger';
 import ExcelJS from 'exceljs';
 import BatchCycleCavityModal from '../components/BatchCycleCavityModal';
+import { parseOrderText, ParsedProductionOrder } from '../utils/orderParser';
 import { 
   PackageSearch, 
   Search, 
@@ -883,12 +884,84 @@ export default function ProductionOrders() {
   const [viewingOrder, setViewingOrder] = useState<ProductionOrder | null>(null);
   const [rateMethod, setRateMethod] = useState<'cycle' | 'hourly'>('cycle');
 
+  // Quick Paste Production Order State
+  const [isPasteModalOpen, setIsPasteModalOpen] = useState(false);
+  const [pasteInputText, setPasteInputText] = useState('');
+  const [pasteFeedback, setPasteFeedback] = useState<string | null>(null);
+
   // Form State for Order Modal (Preserves custom cycleTime, cavities, and hourly rates)
+  const initialOrderFormData = {
+    itemName: '',
+    assignedMachine: '',
+    startDate: new Date().toISOString().split('T')[0],
+    endDate: new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
+    dateEntered: new Date().toISOString().split('T')[0],
+    status: 'Planned' as ProductionOrder['status'],
+    granulesType: '',
+    colorant: '',
+    packagingDetails: '',
+    unit: 'bags',
+    cratesQuantity: '',
+    looseQuantity: '',
+    quantity: '' as string | number,
+    producedQuantity: 0 as string | number,
+    notes: ''
+  };
+
+  const [orderFormData, setOrderFormData] = useState(initialOrderFormData);
   const [orderFormAssignedMachine, setOrderFormAssignedMachine] = useState('');
   const [orderFormRateMethod, setOrderFormRateMethod] = useState<'cycle' | 'hourly'>('cycle');
   const [orderFormCycleTime, setOrderFormCycleTime] = useState<number>(12);
   const [orderFormCavities, setOrderFormCavities] = useState<number>(1);
   const [orderFormHourlyRate, setOrderFormHourlyRate] = useState<number>(2400);
+
+  const applyParsedOrder = (parsed: ParsedProductionOrder | null) => {
+    if (!parsed) return;
+
+    let targetMachName = parsed.machineName || orderFormAssignedMachine || machines[0]?.name || '';
+    const machObj = machines.find(m => m.name.toLowerCase() === targetMachName.toLowerCase())
+      || machines.find(m => m.name.toLowerCase().includes(targetMachName.toLowerCase()))
+      || machines.find(m => m.m === targetMachName.replace(/\D/g, ''))
+      || machines[0];
+
+    if (machObj) {
+      targetMachName = machObj.name;
+    }
+
+    const isBlow = machObj?.type === 'blow' || targetMachName.toUpperCase().includes('BLOW');
+    const isLabel = machObj?.type === 'label' || targetMachName.toUpperCase().includes('LABEL');
+    const defMethod = (isBlow || isLabel) ? 'hourly' : 'cycle';
+    const method = parsed.rateMethod || machObj?.rateMethod || defMethod;
+
+    setEditingOrder(null);
+    setIsContinuousOrder(false);
+    setOrderFormAssignedMachine(targetMachName);
+    setOrderFormRateMethod(method);
+    setOrderFormCycleTime(parsed.cycleTime ?? machObj?.cycleTime ?? 12);
+    setOrderFormCavities(parsed.cavities ?? machObj?.cavities ?? 1);
+    setOrderFormHourlyRate(parsed.hourlyRate ?? machObj?.hourlyRate ?? (isBlow ? 2400 : isLabel ? 3500 : 1000));
+
+    setOrderFormData({
+      itemName: parsed.itemName || '',
+      assignedMachine: targetMachName,
+      startDate: new Date().toISOString().split('T')[0],
+      endDate: new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
+      dateEntered: new Date().toISOString().split('T')[0],
+      status: 'Planned',
+      granulesType: parsed.granulesType || '',
+      colorant: parsed.colorant || '',
+      packagingDetails: parsed.packagingDetails || '',
+      unit: parsed.unit || 'bags',
+      cratesQuantity: parsed.cratesQuantity || '',
+      looseQuantity: parsed.looseQuantity || '',
+      quantity: parsed.quantity > 0 ? parsed.quantity : '',
+      producedQuantity: 0,
+      notes: parsed.notes || ''
+    });
+
+    setIsPasteModalOpen(false);
+    setIsCreatingOrder(true);
+  };
 
   const openOrderModal = (orderToEdit?: ProductionOrder | null, preselectedMachine?: string) => {
     if (orderToEdit) {
@@ -905,6 +978,24 @@ export default function ProductionOrders() {
       setOrderFormCycleTime(orderToEdit.cycleTime ?? machObj?.cycleTime ?? 12);
       setOrderFormCavities(orderToEdit.cavities ?? machObj?.cavities ?? 1);
       setOrderFormHourlyRate(orderToEdit.hourlyRate ?? machObj?.hourlyRate ?? (isBlow ? 2400 : isLabel ? 3500 : 1000));
+
+      setOrderFormData({
+        itemName: orderToEdit.itemName || '',
+        assignedMachine: orderToEdit.assignedMachine || machines[0]?.name || '',
+        startDate: orderToEdit.startDate?.split('T')[0] || new Date().toISOString().split('T')[0],
+        endDate: orderToEdit.endDate?.split('T')[0] || new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
+        dateEntered: orderToEdit.dateEntered?.split('T')[0] || new Date().toISOString().split('T')[0],
+        status: orderToEdit.status || 'Planned',
+        granulesType: orderToEdit.granulesType || '',
+        colorant: orderToEdit.colorant || '',
+        packagingDetails: orderToEdit.packagingDetails || '',
+        unit: orderToEdit.unit || 'bags',
+        cratesQuantity: orderToEdit.cratesQuantity || '',
+        looseQuantity: orderToEdit.looseQuantity || '',
+        quantity: orderToEdit.quantity ?? '',
+        producedQuantity: orderToEdit.producedQuantity ?? 0,
+        notes: orderToEdit.notes || ''
+      });
     } else {
       const targetMachName = preselectedMachine || machines[0]?.name || '';
       const machObj = machines.find(m => m.name === targetMachName);
@@ -920,12 +1011,31 @@ export default function ProductionOrders() {
       setOrderFormCycleTime(machObj?.cycleTime ?? 12);
       setOrderFormCavities(machObj?.cavities ?? 1);
       setOrderFormHourlyRate(machObj?.hourlyRate ?? (isBlow ? 2400 : isLabel ? 3500 : 1000));
+
+      setOrderFormData({
+        itemName: '',
+        assignedMachine: targetMachName,
+        startDate: new Date().toISOString().split('T')[0],
+        endDate: new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
+        dateEntered: new Date().toISOString().split('T')[0],
+        status: 'Planned',
+        granulesType: '',
+        colorant: '',
+        packagingDetails: '',
+        unit: 'bags',
+        cratesQuantity: '',
+        looseQuantity: '',
+        quantity: '',
+        producedQuantity: 0,
+        notes: ''
+      });
     }
     setIsCreatingOrder(true);
   };
 
   const handleMachineSelectionChange = (newMachName: string) => {
     setOrderFormAssignedMachine(newMachName);
+    setOrderFormData(prev => ({ ...prev, assignedMachine: newMachName }));
     const machObj = machines.find(m => m.name === newMachName);
     const isBlow = machObj?.type === 'blow' || (newMachName && newMachName.toUpperCase().includes('BLOW'));
     const isLabel = machObj?.type === 'label' || (newMachName && newMachName.toUpperCase().includes('LABEL'));
@@ -2611,6 +2721,32 @@ export default function ProductionOrders() {
 
           {!isViewer && (
             <button type="button" 
+              onClick={() => {
+                setIsPasteModalOpen(true);
+                setPasteFeedback(null);
+                if (navigator.clipboard && navigator.clipboard.readText) {
+                  navigator.clipboard.readText().then(text => {
+                    if (text && text.trim()) {
+                      setPasteInputText(text);
+                    }
+                  }).catch(() => {});
+                }
+              }}
+              className="group flex items-center gap-2 px-3.5 py-2 bg-indigo-500/10 hover:bg-indigo-500/15 text-indigo-300 hover:text-indigo-200 border border-indigo-500/25 hover:border-indigo-500/40 rounded-xl text-xs font-medium transition-all duration-200 shadow-xs hover:shadow-indigo-500/10 active:scale-[0.98] cursor-pointer"
+              title="Paste order specifications in Arabic or English to auto-populate fields"
+            >
+              <div className="w-5 h-5 rounded-lg bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 group-hover:scale-110 transition-transform">
+                <ClipboardPaste className="w-3.5 h-3.5" />
+              </div>
+              <span>Paste Order</span>
+              <span className="text-[10px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded-md bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-mono">
+                Auto
+              </span>
+            </button>
+          )}
+
+          {!isViewer && (
+            <button type="button" 
               onClick={() => openOrderModal()}
               className="group flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-600 hover:from-purple-500 hover:via-indigo-500 hover:to-purple-500 text-white rounded-xl text-xs font-semibold transition-all duration-200 shadow-md shadow-purple-600/30 hover:shadow-purple-600/50 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98] border border-purple-400/30 cursor-pointer"
             >
@@ -3579,12 +3715,39 @@ export default function ProductionOrders() {
                   </p>
                 </div>
               </div>
-              <button type="button" 
-                onClick={() => { setIsCreatingOrder(false); setEditingOrder(null); }}
-                className="text-tertiary hover:text-primary transition-colors p-1.5 hover:bg-surface-elevated rounded-xl cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-2">
+                {!isViewer && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        if (navigator.clipboard && navigator.clipboard.readText) {
+                          const text = await navigator.clipboard.readText();
+                          if (text && text.trim()) {
+                            const parsed = parseOrderText(text, machines);
+                            if (parsed && (parsed.itemName || parsed.machineName)) {
+                              applyParsedOrder(parsed);
+                              return;
+                            }
+                          }
+                        }
+                      } catch {}
+                      setIsPasteModalOpen(true);
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-300 border border-indigo-500/30 rounded-xl text-xs font-semibold transition cursor-pointer"
+                    title="Quick paste specifications directly from clipboard or text"
+                  >
+                    <ClipboardPaste className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>Paste / لصق بيانات</span>
+                  </button>
+                )}
+                <button type="button" 
+                  onClick={() => { setIsCreatingOrder(false); setEditingOrder(null); }}
+                  className="text-tertiary hover:text-primary transition-colors p-1.5 hover:bg-surface-elevated rounded-xl cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
             
             <form onSubmit={handleSubmit} onChange={handleFormChange} className="overflow-y-auto p-6 space-y-5 flex-1">
@@ -3604,7 +3767,8 @@ export default function ProductionOrders() {
                       <input
                         name="itemName"
                         required
-                        defaultValue={editingOrder?.itemName}
+                        value={orderFormData.itemName}
+                        onChange={(e) => setOrderFormData(prev => ({ ...prev, itemName: e.target.value }))}
                         className="w-full px-3.5 py-2 bg-canvas text-primary border border-divider rounded-xl text-sm outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all font-medium"
                         placeholder="مثال: سطل سليمانية 2 كغم"
                         dir="rtl"
@@ -3635,7 +3799,8 @@ export default function ProductionOrders() {
                         <input
                           name="startDate"
                           type="date"
-                          defaultValue={editingOrder?.startDate || new Date().toISOString().split('T')[0]}
+                          value={orderFormData.startDate}
+                          onChange={(e) => setOrderFormData(prev => ({ ...prev, startDate: e.target.value }))}
                           className="w-full px-3 py-1.5 bg-canvas text-primary border border-divider rounded-xl text-xs outline-none focus:border-purple-500 font-mono"
                         />
                       </div>
@@ -3644,7 +3809,8 @@ export default function ProductionOrders() {
                         <input
                           name="endDate"
                           type="date"
-                          defaultValue={editingOrder?.endDate || new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0]}
+                          value={orderFormData.endDate}
+                          onChange={(e) => setOrderFormData(prev => ({ ...prev, endDate: e.target.value }))}
                           className="w-full px-3 py-1.5 bg-canvas text-primary border border-divider rounded-xl text-xs outline-none focus:border-purple-500 font-mono"
                         />
                       </div>
@@ -3656,7 +3822,8 @@ export default function ProductionOrders() {
                         <input
                           name="dateEntered"
                           type="date"
-                          defaultValue={editingOrder?.dateEntered || new Date().toISOString().split('T')[0]}
+                          value={orderFormData.dateEntered}
+                          onChange={(e) => setOrderFormData(prev => ({ ...prev, dateEntered: e.target.value }))}
                           className="w-full px-3 py-1.5 bg-canvas text-primary border border-divider rounded-xl text-xs outline-none focus:border-purple-500 font-mono"
                         />
                       </div>
@@ -3664,7 +3831,8 @@ export default function ProductionOrders() {
                         <label className="block text-xs font-semibold text-secondary mb-1">Status</label>
                         <select
                           name="status"
-                          defaultValue={editingOrder?.status || 'Planned'}
+                          value={orderFormData.status}
+                          onChange={(e) => setOrderFormData(prev => ({ ...prev, status: e.target.value as ProductionOrder['status'] }))}
                           className="w-full px-3 py-1.5 bg-canvas text-primary border border-divider rounded-xl text-xs outline-none focus:border-purple-500 font-medium"
                         >
                           <option value="Planned">Planned (Scheduled)</option>
@@ -3688,7 +3856,8 @@ export default function ProductionOrders() {
                         <label className="block text-xs font-semibold text-secondary mb-1">Raw Material / Granules</label>
                         <input
                           name="granulesType"
-                          defaultValue={editingOrder?.granulesType || ''}
+                          value={orderFormData.granulesType}
+                          onChange={(e) => setOrderFormData(prev => ({ ...prev, granulesType: e.target.value }))}
                           className="w-full px-3 py-2 bg-canvas text-primary border border-divider rounded-xl text-xs outline-none focus:border-purple-500"
                           placeholder="e.g. PP C440 / HDPE"
                           dir="rtl"
@@ -3698,7 +3867,8 @@ export default function ProductionOrders() {
                         <label className="block text-xs font-semibold text-secondary mb-1">Color / Masterbatch</label>
                         <input
                           name="colorant"
-                          defaultValue={editingOrder?.colorant || ''}
+                          value={orderFormData.colorant}
+                          onChange={(e) => setOrderFormData(prev => ({ ...prev, colorant: e.target.value }))}
                           className="w-full px-3 py-2 bg-canvas text-primary border border-divider rounded-xl text-xs outline-none focus:border-purple-500"
                           placeholder="مثال: أبيض / برتقالي"
                           dir="rtl"
@@ -3711,7 +3881,19 @@ export default function ProductionOrders() {
                         <label className="block text-xs font-semibold text-secondary mb-1">Packaging Description</label>
                         <input
                           name="packagingDetails"
-                          defaultValue={editingOrder?.packagingDetails || ''}
+                          value={orderFormData.packagingDetails}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            const pack = parseInt(val || '0', 10);
+                            const crates = parseInt(orderFormData.cratesQuantity || '0', 10);
+                            const loose = parseInt(orderFormData.looseQuantity || '0', 10);
+                            const autoQty = (crates > 0 && pack > 0) ? (crates * pack + loose) : orderFormData.quantity;
+                            setOrderFormData(prev => ({
+                              ...prev,
+                              packagingDetails: val,
+                              quantity: autoQty
+                            }));
+                          }}
                           className="w-full px-3 py-2 bg-canvas text-primary border border-divider rounded-xl text-xs outline-none focus:border-purple-500"
                           placeholder="مثال: كيس 210 عدد / كرتونة"
                           dir="rtl"
@@ -3721,7 +3903,8 @@ export default function ProductionOrders() {
                         <label className="block text-xs font-semibold text-secondary mb-1">Unit</label>
                         <select
                           name="unit"
-                          defaultValue={getOrderUnit(editingOrder)}
+                          value={orderFormData.unit}
+                          onChange={(e) => setOrderFormData(prev => ({ ...prev, unit: e.target.value }))}
                           className="w-full px-3 py-2 bg-canvas text-primary border border-divider rounded-xl text-xs outline-none focus:border-purple-500"
                         >
                           <option value="pcs">Pieces (pcs)</option>
@@ -3924,7 +4107,19 @@ export default function ProductionOrders() {
                             <input
                               name="cratesQuantity"
                               type="number"
-                              defaultValue={editingOrder?.cratesQuantity}
+                              value={orderFormData.cratesQuantity}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                const crates = parseInt(val || '0', 10);
+                                const pack = parseInt(orderFormData.packagingDetails || '0', 10);
+                                const loose = parseInt(orderFormData.looseQuantity || '0', 10);
+                                const autoQty = (crates > 0 && pack > 0) ? (crates * pack + loose) : (val ? crates : orderFormData.quantity);
+                                setOrderFormData(prev => ({
+                                  ...prev,
+                                  cratesQuantity: val,
+                                  quantity: autoQty !== '' ? autoQty : prev.quantity
+                                }));
+                              }}
                               className="w-full px-3 py-2 bg-canvas text-primary border border-divider rounded-xl text-xs outline-none focus:border-purple-500"
                               placeholder="مثال: 47 Boxs"
                             />
@@ -3934,7 +4129,19 @@ export default function ProductionOrders() {
                             <input
                               name="looseQuantity"
                               type="number"
-                              defaultValue={editingOrder?.looseQuantity}
+                              value={orderFormData.looseQuantity}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                const loose = parseInt(val || '0', 10);
+                                const crates = parseInt(orderFormData.cratesQuantity || '0', 10);
+                                const pack = parseInt(orderFormData.packagingDetails || '0', 10);
+                                const autoQty = (crates > 0 && pack > 0) ? (crates * pack + loose) : orderFormData.quantity;
+                                setOrderFormData(prev => ({
+                                  ...prev,
+                                  looseQuantity: val,
+                                  quantity: autoQty
+                                }));
+                              }}
                               className="w-full px-3 py-2 bg-canvas text-primary border border-divider rounded-xl text-xs outline-none focus:border-purple-500"
                               placeholder="مثال: 130"
                             />
@@ -3948,7 +4155,8 @@ export default function ProductionOrders() {
                               name="quantity"
                               type="number"
                               min="1"
-                              defaultValue={editingOrder?.quantity || ''}
+                              value={orderFormData.quantity}
+                              onChange={(e) => setOrderFormData(prev => ({ ...prev, quantity: e.target.value }))}
                               className="w-full px-3.5 py-2 bg-canvas text-primary border border-divider rounded-xl text-xs font-mono font-bold outline-none focus:border-purple-500"
                               placeholder="10000"
                             />
@@ -3959,7 +4167,8 @@ export default function ProductionOrders() {
                               name="producedQuantity"
                               type="number"
                               min="0"
-                              defaultValue={editingOrder ? getProducedCount(editingOrder) : 0}
+                              value={orderFormData.producedQuantity}
+                              onChange={(e) => setOrderFormData(prev => ({ ...prev, producedQuantity: e.target.value }))}
                               className="w-full px-3.5 py-2 bg-canvas text-primary border border-divider rounded-xl text-xs font-mono font-bold outline-none focus:border-purple-500"
                               placeholder="0"
                             />
@@ -3974,7 +4183,8 @@ export default function ProductionOrders() {
                             name="producedQuantity"
                             type="number"
                             min="0"
-                            defaultValue={editingOrder ? getProducedCount(editingOrder) : 0}
+                            value={orderFormData.producedQuantity}
+                            onChange={(e) => setOrderFormData(prev => ({ ...prev, producedQuantity: e.target.value }))}
                             className="w-full px-3.5 py-2 bg-canvas text-primary border border-divider rounded-xl text-xs font-mono font-bold outline-none focus:border-purple-500"
                             placeholder="0"
                           />
@@ -3994,7 +4204,8 @@ export default function ProductionOrders() {
                     <textarea
                       name="notes"
                       rows={2}
-                      defaultValue={editingOrder?.notes}
+                      value={orderFormData.notes}
+                      onChange={(e) => setOrderFormData(prev => ({ ...prev, notes: e.target.value }))}
                       className="w-full px-3.5 py-2 bg-canvas text-primary border border-divider rounded-xl text-xs outline-none focus:border-purple-500 resize-none font-sans"
                       placeholder="E.g., Any setup properties, mold ID, or emergency comments..."
                       dir="rtl"
@@ -4021,6 +4232,176 @@ export default function ProductionOrders() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL - QUICK PASTE PRODUCTION ORDER SPECIFICATIONS */}
+      {isPasteModalOpen && (
+        <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-surface border border-divider rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="px-6 py-4 border-b border-divider/70 flex items-center justify-between shrink-0 bg-surface-elevated/30">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/15 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shrink-0 shadow-xs">
+                  <ClipboardPaste className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-primary flex items-center gap-2">
+                    Quick Paste Production Order
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400">
+                      Arabic / English
+                    </span>
+                  </h3>
+                  <p className="text-xs text-tertiary mt-0.5">
+                    Paste raw WhatsApp or floor order specifications to automatically populate all machine, mold & batch parameters.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setIsPasteModalOpen(false); setPasteFeedback(null); }}
+                className="text-tertiary hover:text-primary transition-colors p-1.5 hover:bg-surface-elevated rounded-xl cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 overflow-y-auto flex-1">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-secondary flex items-center gap-2">
+                  <span>Paste Text Here (الصق النص هنا)</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      if (navigator.clipboard && navigator.clipboard.readText) {
+                        const clipText = await navigator.clipboard.readText();
+                        if (clipText && clipText.trim()) {
+                          setPasteInputText(clipText);
+                          setPasteFeedback('Pasted from clipboard successfully!');
+                          setTimeout(() => setPasteFeedback(null), 3000);
+                        }
+                      }
+                    } catch {
+                      setPasteFeedback('Clipboard permission denied. Please paste directly (Ctrl+V).');
+                    }
+                  }}
+                  className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-500/10 border border-indigo-500/20 hover:bg-indigo-500/20 transition cursor-pointer"
+                >
+                  <ClipboardPaste className="w-3.5 h-3.5" />
+                  <span>Paste From Clipboard</span>
+                </button>
+              </div>
+
+              <textarea
+                value={pasteInputText}
+                onChange={(e) => setPasteInputText(e.target.value)}
+                rows={6}
+                dir="rtl"
+                className="w-full px-4 py-3 bg-canvas text-primary border border-divider rounded-xl text-sm outline-none focus:border-indigo-500 font-mono resize-none leading-relaxed"
+                placeholder={`ماكنة 12\nسطل لبن مطبوع البتول لبن جاموس 1400 غرام\nحبيبات Pe546\nلون ابيض 006-10\nتعبئة كارتون 342 عدد\nالكمية 62 كارتون + 296 عدد`}
+              />
+
+              {pasteFeedback && (
+                <p className="text-xs text-indigo-400 flex items-center gap-1.5">
+                  <Check className="w-3.5 h-3.5" /> {pasteFeedback}
+                </p>
+              )}
+
+              {/* Real-time Parser Live Preview HUD */}
+              {(() => {
+                const parsed = parseOrderText(pasteInputText, machines);
+                if (!parsed || (!parsed.machineName && !parsed.itemName)) {
+                  return (
+                    <div className="p-4 bg-surface-elevated/20 border border-dashed border-divider rounded-xl text-center text-xs text-tertiary">
+                      Paste or enter order lines above to see instant field breakdown and calculations.
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="p-4 bg-surface-elevated/40 border border-indigo-500/30 rounded-2xl space-y-3 shadow-inner">
+                    <div className="flex items-center justify-between border-b border-divider/60 pb-2.5">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                        <span className="text-xs font-bold text-primary">Live Detection Preview (معاينة الحقول المكتشفة)</span>
+                      </div>
+                      <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">
+                        {parsed.machineName || 'Machine Auto-Detect'}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                      <div className="bg-canvas/70 p-2.5 rounded-xl border border-divider/60">
+                        <span className="text-[10px] text-tertiary block font-semibold uppercase">Product / Item</span>
+                        <span className="font-bold text-primary text-xs" dir="rtl">{parsed.itemName || '—'}</span>
+                      </div>
+
+                      <div className="bg-canvas/70 p-2.5 rounded-xl border border-divider/60">
+                        <span className="text-[10px] text-tertiary block font-semibold uppercase">Machine & Tooling</span>
+                        <span className="font-bold text-indigo-400">
+                          {parsed.machineName} {parsed.cycleTime ? `(${parsed.cycleTime}s • ${parsed.cavities} cav)` : ''}
+                        </span>
+                      </div>
+
+                      <div className="bg-canvas/70 p-2.5 rounded-xl border border-divider/60">
+                        <span className="text-[10px] text-tertiary block font-semibold uppercase">Granules & Color</span>
+                        <span className="font-medium text-secondary" dir="rtl">
+                          {parsed.granulesType || '—'} • {parsed.colorant || '—'}
+                        </span>
+                      </div>
+
+                      <div className="bg-canvas/70 p-2.5 rounded-xl border border-divider/60">
+                        <span className="text-[10px] text-tertiary block font-semibold uppercase">Packaging & Quantity</span>
+                        <span className="font-bold text-emerald-400 font-mono">
+                          {parsed.cratesQuantity ? `${parsed.cratesQuantity} boxs` : ''} 
+                          {parsed.looseQuantity ? ` + ${parsed.looseQuantity} loose` : ''}
+                          {parsed.quantity > 0 ? ` = ${parsed.quantity.toLocaleString()} pcs Target` : ''}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            <div className="px-6 py-4 border-t border-divider flex items-center justify-between shrink-0 bg-surface">
+              <button
+                type="button"
+                onClick={() => setPasteInputText(`ماكنة 12\nسطل لبن مطبوع البتول لبن جاموس 1400 غرام\nحبيبات Pe546\nلون ابيض 006-10\nتعبئة كارتون 342 عدد\nالكمية 62 كارتون + 296 عدد`)}
+                className="text-xs text-tertiary hover:text-secondary underline cursor-pointer"
+              >
+                Load Sample Arabic Order
+              </button>
+
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => { setIsPasteModalOpen(false); setPasteFeedback(null); }}
+                  className="px-4 py-2 text-xs font-semibold text-secondary hover:text-primary hover:bg-surface-elevated rounded-xl transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const parsed = parseOrderText(pasteInputText, machines);
+                    if (parsed && (parsed.machineName || parsed.itemName)) {
+                      applyParsedOrder(parsed);
+                    } else {
+                      setPasteFeedback('Could not detect order fields. Please verify format.');
+                    }
+                  }}
+                  disabled={!pasteInputText.trim()}
+                  className="px-5 py-2.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl transition shadow-md shadow-indigo-600/25 active:scale-95 cursor-pointer flex items-center gap-1.5"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>Schedule This Order (تعبئة وتأكيد الطلب)</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
